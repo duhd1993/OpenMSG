@@ -18,8 +18,7 @@ The implementation follows the sign and shape conventions in
 ## Quick Start
 
 ```bash
-python -m pip install -e .
-PYTHONPATH=src python -m openmsg examples/homogeneous_3d.json
+uv run python -m openmsg examples/homogeneous_3d.json
 ```
 
 This prints the homogenized stiffness matrix for a homogeneous periodic unit
@@ -28,14 +27,14 @@ cube. It should match the input isotropic stiffness.
 Write results to a file:
 
 ```bash
-PYTHONPATH=src python -m openmsg examples/homogeneous_3d.json --output result.json
+uv run python -m openmsg examples/homogeneous_3d.json --output result.json
 ```
 
-Install dependencies and run tests:
+Run tests (the `openmsg` package is installed editable in the uv environment, so
+no `PYTHONPATH` is needed):
 
 ```bash
-python -m pip install -e .
-PYTHONPATH=src python -m unittest discover
+uv run python -m unittest discover -s tests
 ```
 
 OpenMSG uses TensorMesh for MSG finite element assembly. `linear_solver:
@@ -75,6 +74,38 @@ result = homogenize_3d_cauchy(
 print(result.Dbar)
 ```
 
+## Differentiable API (autograd)
+
+The assembly and constrained solve are fully tensorized in PyTorch and
+differentiable. `effective_stiffness` returns the homogenized stiffness `Dbar`
+as a `torch.Tensor` with autograd history back to the material stiffness tensors
+and the node coordinates, so material or geometry parameters can be optimized
+with gradient descent.
+
+```python
+import torch
+
+from openmsg import effective_stiffness, isotropic_stiffness
+
+# mesh: a SolidMesh, as constructed in the Python API example above.
+C = torch.tensor(isotropic_stiffness(young=100.0, poisson=0.25), requires_grad=True)
+nodes = torch.tensor(mesh.nodes, dtype=torch.float64, requires_grad=True)
+
+result = effective_stiffness(
+    mesh=mesh,
+    material_stiffness={"matrix": C},
+    nodes=nodes,  # optional; omit to differentiate with respect to material only
+    macro_model="cauchy_3d",
+)
+result.Dbar[0, 0].backward()  # any scalar objective on Dbar
+print(C.grad, nodes.grad)     # gradients with respect to material and geometry
+```
+
+The constrained saddle-point system is solved with the differentiable
+`torch-sla` sparse solver built into TensorMesh. `homogenize_msg` wraps
+`effective_stiffness` and returns a detached NumPy `MSGResult` for reporting and
+JSON output.
+
 ## Input Format
 
 See `docs/INPUT_FORMAT.md` and `examples/`.
@@ -98,7 +129,7 @@ classical laminate utility without an SG finite element solve.
 ## Square-Pack Benchmark
 
 ```bash
-PYTHONPATH=src python examples/square_pack_fiber.py --cells-xy 8 --vf 0.35
+uv run python examples/square_pack_fiber.py --cells-xy 8 --vf 0.35
 ```
 
 The script is a benchmark/input generator, not part of the public solver API.

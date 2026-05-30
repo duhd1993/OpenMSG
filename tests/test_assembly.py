@@ -15,7 +15,7 @@ class AssemblyTests(unittest.TestCase):
         C = isotropic_stiffness(100.0, 0.25)
         assembly, metadata = assemble_3d_cauchy(mesh, {"m": C})
 
-        self.assertEqual(metadata["assembly_kernel"], "tensormesh_element_assembler")
+        self.assertEqual(metadata["assembly_kernel"], "tensormesh_autograd")
         self.assertEqual(assembly.E.shape, (mesh.n_dof, mesh.n_dof))
         self.assertEqual(assembly.H.shape, (mesh.n_dof, 6))
         self.assertAlmostEqual(assembly.volume, 1.0)

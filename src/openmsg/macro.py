@@ -105,6 +105,50 @@ class MacroModel:
             )
         raise ValueError(f"unsupported macro model {self.kind!r}")
 
+    def strain_modes_batch(self, points: object, torch: object) -> object:
+        """Vectorized :meth:`strain_modes_torch` over a batch of SG points.
+
+        ``points`` has shape ``[..., 3]`` (physical SG coordinates) and the
+        return value has shape ``[..., 6, n_macro]``. This is the differentiable
+        kernel used by the autograd assembly path; gradients flow through the
+        point coordinates for geometry-dependent macro models.
+        """
+
+        batch = tuple(points.shape[:-1])  # type: ignore[attr-defined]
+        dtype = points.dtype  # type: ignore[attr-defined]
+        device = points.device  # type: ignore[attr-defined]
+        if self.kind == "cauchy_3d":
+            eye = torch.eye(6, dtype=dtype, device=device)
+            return eye.broadcast_to((*batch, 6, 6))
+
+        zero = torch.zeros(batch, dtype=dtype, device=device)
+        one = torch.ones(batch, dtype=dtype, device=device)
+        if self.kind == "kirchhoff_love_plate":
+            z = points[..., self.thickness_axis] - self.reference_point[self.thickness_axis]  # type: ignore[index]
+            rows = [
+                [one, zero, zero, z, zero, zero],
+                [zero, one, zero, zero, z, zero],
+                [zero, zero, zero, zero, zero, zero],
+                [zero, zero, zero, zero, zero, zero],
+                [zero, zero, zero, zero, zero, zero],
+                [zero, zero, one, zero, zero, z],
+            ]
+            return torch.stack([torch.stack(row, dim=-1) for row in rows], dim=-2)
+        if self.kind == "euler_bernoulli_beam":
+            y2_axis, y3_axis = self.cross_section_axes
+            y2 = points[..., y2_axis] - self.reference_point[y2_axis]  # type: ignore[index]
+            y3 = points[..., y3_axis] - self.reference_point[y3_axis]  # type: ignore[index]
+            rows = [
+                [one, zero, y3, -y2],
+                [zero, zero, zero, zero],
+                [zero, zero, zero, zero],
+                [zero, zero, zero, zero],
+                [zero, y2, zero, zero],
+                [zero, -y3, zero, zero],
+            ]
+            return torch.stack([torch.stack(row, dim=-1) for row in rows], dim=-2)
+        raise ValueError(f"unsupported macro model {self.kind!r}")
+
     def normalization(self, mesh: SolidMesh, sg_measure: float) -> float:
         """Return the MSG omega factor for this macroscopic model."""
 

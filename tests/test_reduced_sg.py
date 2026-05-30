@@ -61,7 +61,7 @@ class ReducedSGTests(unittest.TestCase):
 
         result = homogenize_3d_cauchy(mesh=mesh, material_stiffness={"m": C})
 
-        self.assertEqual(result.metadata["assembly_kernel"], "tensormesh_element_assembler")
+        self.assertEqual(result.metadata["assembly_kernel"], "tensormesh_autograd")
         np.testing.assert_allclose(result.Dbar, C, rtol=1e-10, atol=1e-10)
 
     def test_lower_dimensional_sg_assembly_matches_homogeneous_reference(self) -> None:
@@ -72,7 +72,7 @@ class ReducedSGTests(unittest.TestCase):
             with self.subTest(element_type=mesh.element_type):
                 assembly, metadata = assemble_3d_cauchy(mesh, {"m": C})
                 result = homogenize_3d_cauchy(mesh=mesh, material_stiffness={"m": C})
-                self.assertEqual(metadata["assembly_kernel"], "tensormesh_element_assembler")
+                self.assertEqual(metadata["assembly_kernel"], "tensormesh_autograd")
                 np.testing.assert_allclose(assembly.E, assembly.E.T, atol=1e-11)
                 np.testing.assert_allclose(assembly.D0, C * assembly.volume, rtol=1e-12, atol=1e-12)
                 np.testing.assert_allclose(result.Dbar, C, rtol=1e-10, atol=1e-10)
@@ -114,9 +114,9 @@ class ReducedSGTests(unittest.TestCase):
         C = isotropic_stiffness(100.0, 0.25)
         macro_strain = np.array([0.01, -0.02, 0.03, 0.004, -0.005, 0.006])
         cases = [
-            (line2_sg_mesh(), 2),
-            (quad4_sg_mesh(), 4),
-            (tri3_sg_mesh(), 2),
+            (line2_sg_mesh(), 2),  # 1 element x 2 quadrature points
+            (quad4_sg_mesh(), 4),  # 1 element x 4 quadrature points
+            (tri3_sg_mesh(), 6),  # 2 elements x 3 quadrature points
         ]
 
         for mesh, expected_points in cases:

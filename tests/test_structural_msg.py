@@ -163,7 +163,7 @@ class StructuralMSGTests(unittest.TestCase):
             with self.subTest(model=homogenize.__name__):
                 sparse_result = homogenize(mesh=mesh, material_stiffness={"m": C})
                 dense_result = homogenize(mesh=mesh, material_stiffness={"m": C}, linear_solver="dense")
-                self.assertEqual(sparse_result.metadata["assembly_kernel"], "tensormesh_element_assembler")
+                self.assertEqual(sparse_result.metadata["assembly_kernel"], "tensormesh_autograd")
                 np.testing.assert_allclose(dense_result.Dbar, sparse_result.Dbar, rtol=1e-10, atol=1e-10)
                 np.testing.assert_allclose(dense_result.H, sparse_result.H, rtol=1e-12, atol=1e-12)
                 np.testing.assert_allclose(dense_result.D0, sparse_result.D0, rtol=1e-12, atol=1e-12)

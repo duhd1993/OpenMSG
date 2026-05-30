@@ -1,8 +1,11 @@
 """OpenMSG public API."""
 
+from openmsg.assembly import MSGSystem, assemble_msg_system
 from openmsg.config import load_config, run_config
 from openmsg.homogenize import (
     MSGResult,
+    MSGTorchResult,
+    effective_stiffness,
     homogenize_3d_cauchy,
     homogenize_euler_bernoulli_beam,
     homogenize_kirchhoff_love_plate,
@@ -33,10 +36,14 @@ __all__ = [
     "LaminateABDResult",
     "MacroModel",
     "MSGResult",
+    "MSGSystem",
+    "MSGTorchResult",
     "Ply",
     "SolidMesh",
+    "assemble_msg_system",
     "compute_effective_stiffness",
     "cubic_stiffness",
+    "effective_stiffness",
     "engineering_constants_from_stiffness",
     "homogenize_3d_cauchy",
     "homogenize_euler_bernoulli_beam",

@@ -15,8 +15,15 @@ The current implementation scope is intentionally small:
 - Local Gauss-point strain and stress recovery.
 - Periodic and mean-zero constraints on the fluctuation field `w`; periodic
   constraints are not imposed on the full displacement field.
-- TensorMesh-backed assembly for supported 1D/2D/3D SG elements. The former
-  hand-written NumPy assembly path has been removed.
+- TensorMesh-backed assembly and solve for supported 1D/2D/3D SG elements. The
+  pipeline is fully tensorized in PyTorch and differentiable: `effective_stiffness`
+  returns `Dbar` as a `torch.Tensor` with autograd history back to the material
+  stiffness tensors and the node-coordinate tensor (pass either with
+  `requires_grad=True`). The constrained saddle-point system is solved with the
+  differentiable `torch-sla` sparse solver (`SparseMatrix.solve(method="lu")`).
+  `homogenize_msg` wraps `effective_stiffness` and returns a detached NumPy
+  `MSGResult` for reporting. The former hand-written NumPy assembly/solve path
+  has been removed.
 - Explicit input meshes are preferred. Mesh generation belongs in examples,
   tests, or external preprocessing scripts, not in the solver core.
 - `analysis.type: "laminate_abd"` is the implemented analytical classical
@@ -48,5 +55,9 @@ Keep the MSG sign convention fixed:
 Every numerical change should include or update tests. Run:
 
 ```bash
-PYTHONPATH=src /private/tmp/openmsg-tensormesh-venv/bin/python -m unittest discover
+uv run python -m unittest discover -s tests
 ```
+
+Use `uv run` for running tests and Python in this project (the `openmsg`
+package is installed editable in the uv environment, so no `PYTHONPATH` is
+needed). Run scripts the same way, e.g. `uv run python examples/square_pack_fiber.py`.

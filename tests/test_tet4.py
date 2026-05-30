@@ -50,7 +50,7 @@ class Tet4Tests(unittest.TestCase):
         C = isotropic_stiffness(100.0, 0.25)
         assembly, metadata = assemble_3d_cauchy(mesh, {"m": C})
 
-        self.assertEqual(metadata["assembly_kernel"], "tensormesh_element_assembler")
+        self.assertEqual(metadata["assembly_kernel"], "tensormesh_autograd")
         self.assertEqual(assembly.E.shape, (12, 12))
         self.assertEqual(assembly.H.shape, (12, 6))
         self.assertAlmostEqual(assembly.volume, 1.0 / 6.0)
@@ -66,7 +66,7 @@ class Tet4Tests(unittest.TestCase):
         np.testing.assert_allclose(result.Dbar, C, rtol=1e-10, atol=1e-10)
         self.assertEqual(result.metadata["n_elements"], 6)
 
-    def test_tet4_dehomogenization_uses_one_quadrature_point_per_element(self) -> None:
+    def test_tet4_dehomogenization_uses_tensormesh_quadrature_points(self) -> None:
         mesh = cube_tet_mesh()
         C = isotropic_stiffness(100.0, 0.25)
         result = homogenize_3d_cauchy(mesh=mesh, material_stiffness={"m": C})
@@ -74,7 +74,8 @@ class Tet4Tests(unittest.TestCase):
 
         fields = recover_gauss_fields(mesh=mesh, material_stiffness={"m": C}, V0=result.V0, macro_strain=macro_strain)
 
-        self.assertEqual(fields["strain"].shape, (6, 6))
+        # 6 tetrahedra x 4 quadrature points per element (TensorMesh order-2 rule).
+        self.assertEqual(fields["strain"].shape, (24, 6))
         for strain in fields["strain"]:
             np.testing.assert_allclose(strain, macro_strain, atol=1e-10)
 

@@ -7,7 +7,6 @@ from typing import Iterable
 
 import numpy as np
 
-from openmsg.elements import iter_element_quadrature
 from openmsg.mesh import HexMesh
 
 AXES = {"x": 0, "y": 1, "z": 2, 0: 0, 1: 1, 2: 2}
@@ -103,20 +102,34 @@ def rotation_zero_constraints(
     """
 
     axis_pairs = [_axis_pair(pair) for pair in pairs] if pairs is not None else [(0, 1), (0, 2), (1, 2)]
+    grad_integral = _node_gradient_integral(mesh)  # [n_nodes, 3]: ∫ dN_node/dx_axis dOmega
+    node = np.arange(mesh.n_nodes)
     rows: list[np.ndarray] = []
     for axis_i, axis_j in axis_pairs:
         row = np.zeros(mesh.n_dof, dtype=float)
-        for conn in mesh.elements:
-            coords = mesh.nodes[conn]
-            for qp in iter_element_quadrature(mesh.element_type, coords, active_axes=mesh.active_axes):
-                for local_node, node in enumerate(conn):
-                    row[3 * node + axis_i] += qp.dN_dx[local_node, axis_j] * qp.dV
-                    row[3 * node + axis_j] -= qp.dN_dx[local_node, axis_i] * qp.dV
+        row[3 * node + axis_i] += grad_integral[:, axis_j]
+        row[3 * node + axis_j] -= grad_integral[:, axis_i]
         if np.linalg.norm(row) > tol:
             rows.append(row)
     if not rows:
         return np.zeros((0, mesh.n_dof), dtype=float)
     return np.vstack(rows)
+
+
+def _node_gradient_integral(mesh: HexMesh) -> np.ndarray:
+    """Return ``∫ dN_node/dx_axis dOmega`` per global node via TensorMesh quadrature."""
+
+    import torch
+
+    from openmsg.assembly import tensormesh_quadrature
+
+    _, _, blocks = tensormesh_quadrature(mesh, dtype=torch.float64)
+    integral = torch.zeros((mesh.n_nodes, 3), dtype=torch.float64)
+    for block in blocks:
+        # contrib[e, node, axis] = sum_q dN_dx[e, q, node, axis] * jxw[e, q]
+        contrib = torch.einsum("eqbd,eq->ebd", block.dN_dx, block.jxw)
+        integral = integral.index_add(0, block.conn.reshape(-1), contrib.reshape(-1, 3))
+    return integral.detach().cpu().numpy()
 
 
 def build_constraint_matrix(

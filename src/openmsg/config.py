@@ -106,9 +106,3 @@ def result_to_json(result: MSGResult | LaminateABDResult, *, include_internal: b
     """Return a formatted JSON string for a result."""
 
     return json.dumps(result.to_dict(include_internal=include_internal), indent=2)
-
-
-def array_from_json(value: object) -> np.ndarray:
-    """Small helper for future config extensions."""
-
-    return np.asarray(value, dtype=float)

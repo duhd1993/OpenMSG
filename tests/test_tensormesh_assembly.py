@@ -17,7 +17,7 @@ class TensorMeshAssemblyTests(unittest.TestCase):
 
         result = homogenize_3d_cauchy(mesh=mesh, material_stiffness={"m": C})
 
-        self.assertEqual(result.metadata["assembly_kernel"], "tensormesh_element_assembler")
+        self.assertEqual(result.metadata["assembly_kernel"], "tensormesh_autograd")
         self.assertEqual(result.metadata["linear_solver"], "sparse")
         np.testing.assert_allclose(result.E, result.E.T, atol=1e-11)
         np.testing.assert_allclose(result.D0, C, rtol=1e-12, atol=1e-12)
