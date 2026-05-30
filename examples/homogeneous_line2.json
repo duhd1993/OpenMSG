@@ -1,0 +1,20 @@
+{
+  "analysis": {
+    "type": "msg_3d_cauchy",
+    "constraints": [
+      {"type": "periodic", "axes": ["x", "y", "z"]},
+      {"type": "mean_zero"}
+    ]
+  },
+  "materials": {
+    "matrix": {"type": "isotropic", "E": 100.0, "nu": 0.25}
+  },
+  "mesh": {
+    "type": "line2",
+    "active_axes": ["z"],
+    "nodes": [[0.0], [1.0]],
+    "elements": [
+      {"nodes": [0, 1], "material": "matrix"}
+    ]
+  }
+}

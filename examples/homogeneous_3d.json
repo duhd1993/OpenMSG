@@ -1,0 +1,28 @@
+{
+  "analysis": {
+    "type": "msg_3d_cauchy",
+    "constraints": [
+      {"type": "periodic", "axes": ["x", "y", "z"]},
+      {"type": "mean_zero"}
+    ]
+  },
+  "materials": {
+    "matrix": {"type": "isotropic", "E": 100.0, "nu": 0.25}
+  },
+  "mesh": {
+    "type": "hex8",
+    "nodes": [
+      [0, 0, 0],
+      [1, 0, 0],
+      [1, 1, 0],
+      [0, 1, 0],
+      [0, 0, 1],
+      [1, 0, 1],
+      [1, 1, 1],
+      [0, 1, 1]
+    ],
+    "elements": [
+      {"nodes": [0, 1, 2, 3, 4, 5, 6, 7], "material": "matrix"}
+    ]
+  }
+}

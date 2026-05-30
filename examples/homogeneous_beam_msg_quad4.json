@@ -1,0 +1,16 @@
+{
+  "analysis": {
+    "type": "msg_euler_bernoulli_beam"
+  },
+  "materials": {
+    "matrix": {"type": "isotropic", "E": 100.0, "nu": 0.25}
+  },
+  "mesh": {
+    "type": "quad4",
+    "active_axes": ["y", "z"],
+    "nodes": [[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5]],
+    "elements": [
+      {"nodes": [0, 1, 2, 3], "material": "matrix"}
+    ]
+  }
+}

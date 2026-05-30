@@ -1,0 +1,350 @@
+# OpenMSG Input Format
+
+OpenMSG reads JSON configuration files. The format is deliberately explicit so
+the same SG finite element core can target 3D Cauchy continuum,
+Kirchhoff-Love plate, and Euler-Bernoulli beam macroscopic models.
+
+## Minimal Example
+
+```json
+{
+  "analysis": {
+    "type": "msg_3d_cauchy",
+    "constraints": [
+      {"type": "periodic", "axes": ["x", "y", "z"]},
+      {"type": "mean_zero"}
+    ]
+  },
+  "materials": {
+    "matrix": {"type": "isotropic", "E": 100.0, "nu": 0.25}
+  },
+  "mesh": {
+    "type": "hex8",
+    "nodes": [[0, 0, 0], [1, 0, 0], "..."],
+    "elements": [
+      {"nodes": [0, 1, 2, 3, 4, 5, 6, 7], "material": "matrix"}
+    ]
+  }
+}
+```
+
+Run it with:
+
+```bash
+PYTHONPATH=src python -m openmsg examples/homogeneous_3d.json
+```
+
+## Analysis Block
+
+```json
+{
+  "type": "msg_3d_cauchy",
+  "linear_solver": "auto",
+  "constraints": [
+    {"type": "periodic", "axes": ["x", "y", "z"]},
+    {"type": "mean_zero"}
+  ]
+}
+```
+
+Supported MSG analysis types:
+
+- `msg_3d_cauchy`: homogenize to a 3D Cauchy continuum. Output is a 6x6
+  material stiffness matrix.
+- `msg_kirchhoff_love_plate`: homogenize to a Kirchhoff-Love plate. Output is
+  a 6x6 `ABD` matrix with generalized strain order
+  `[e11, e22, 2e12, k11, k22, 2k12]`.
+- `msg_euler_bernoulli_beam`: homogenize to an Euler-Bernoulli beam. Output is
+  a 4x4 section stiffness matrix with generalized strain order
+  `[e1, k1, k2, k3]`.
+
+The SG mesh may be 3D, 2D, or 1D for any of these macroscopic models when the
+geometry/material distribution is invariant by translation in the omitted
+directions. `laminate_abd` remains available as a separate analytical classical
+laminate ABD utility.
+
+MSG finite element assembly uses TensorMesh. There is no alternate assembly
+selector in the input format.
+
+Linear solvers:
+
+- `auto`: use sparse saddle-point solving with the TensorMesh stiffness matrix.
+- `dense`: force dense NumPy block solving.
+- `sparse`: force scipy sparse saddle-point solving.
+
+Constraint shorthand is also accepted:
+
+```json
+"constraints": ["periodic", "mean_zero"]
+```
+
+The `periodic` shorthand means all three axes.
+
+If `constraints` is omitted, OpenMSG uses model-specific defaults:
+
+- Cauchy continuum: periodic fluctuation constraints on all axes plus
+  mean-zero.
+- Kirchhoff-Love plate: periodic constraints on active in-plane SG axes, plus
+  mean-zero and average fluctuation-rotation removal.
+- Euler-Bernoulli beam: periodic constraints on an active axial SG axis, plus
+  mean-zero and average twist removal.
+
+Override `constraints` explicitly when a plate or beam SG needs a different
+boundary/periodicity choice.
+
+## MSG Macro Model Options
+
+Plate and beam axes can be configured either directly in `analysis` or inside a
+`macro_model` object:
+
+```json
+{
+  "type": "msg_kirchhoff_love_plate",
+  "thickness_axis": "z",
+  "inplane_axes": ["x", "y"],
+  "reference_point": [0, 0, 0]
+}
+```
+
+```json
+{
+  "type": "msg_euler_bernoulli_beam",
+  "axial_axis": "x",
+  "cross_section_axes": ["y", "z"],
+  "reference_point": [0, 0, 0]
+}
+```
+
+If `reference_point` is omitted, the center of the mesh bounding box is used.
+This point defines the plate reference surface or beam reference line for the
+curvature modes and coupling terms.
+
+The MSG normalization factor `omega` follows the papers:
+
+- Cauchy: SG measure, so the output is an intensive material stiffness.
+- Plate: product of active in-plane SG periods; for a 1D thickness SG,
+  `omega = 1`.
+- Beam: active axial SG period; for a 2D cross-section SG, `omega = 1`.
+
+## Materials Block
+
+Isotropic material:
+
+```json
+"steel": {"type": "isotropic", "E": 210000.0, "nu": 0.3}
+```
+
+Full stiffness matrix:
+
+```json
+"phase": {
+  "type": "stiffness",
+  "C": [[... 6 numbers ...], "... 6 rows total ..."]
+}
+```
+
+Additional material symmetries:
+
+```json
+"cubic": {"type": "cubic", "C11": 250.0, "C12": 150.0, "C44": 90.0}
+```
+
+```json
+"ud": {
+  "type": "transversely_isotropic",
+  "axis": "z",
+  "E_l": 140.0,
+  "E_t": 10.0,
+  "nu_lt": 0.28,
+  "nu_tt": 0.40,
+  "G_lt": 5.0
+}
+```
+
+```json
+"ortho": {
+  "type": "orthotropic",
+  "E1": 30.0,
+  "E2": 20.0,
+  "E3": 10.0,
+  "nu12": 0.25,
+  "nu13": 0.20,
+  "nu23": 0.18,
+  "G12": 8.0,
+  "G13": 6.0,
+  "G23": 4.0
+}
+```
+
+All stiffness matrices use Voigt order:
+
+```text
+[e11, e22, e33, 2e23, 2e13, 2e12]
+```
+
+## Analytical Laminate ABD Input
+
+For a classical laminate ABD calculation without an SG finite element solve:
+
+```json
+{
+  "analysis": {"type": "laminate_abd"},
+  "materials": {
+    "ud": {
+      "type": "orthotropic",
+      "E1": 140.0,
+      "E2": 10.0,
+      "E3": 10.0,
+      "nu12": 0.28,
+      "nu13": 0.28,
+      "nu23": 0.40,
+      "G12": 5.0,
+      "G13": 5.0,
+      "G23": 3.57
+    }
+  },
+  "laminate": {
+    "plies": [
+      {"material": "ud", "thickness": 0.125, "angle": 0},
+      {"material": "ud", "thickness": 0.125, "angle": 90},
+      {"material": "ud", "thickness": 0.125, "angle": 90},
+      {"material": "ud", "thickness": 0.125, "angle": 0}
+    ]
+  }
+}
+```
+
+The output contains `A`, `B`, `D`, and the assembled `ABD` matrix. Ply angles
+are in degrees and rotate the reduced in-plane stiffness before thickness
+integration.
+
+## Explicit SG Mesh
+
+The production-oriented input path is an explicit mesh with nodes, element
+connectivity, and one material name per element. The supported first-order SG
+element types are:
+
+- `hex8`: 8-node trilinear hexahedron.
+- `tet4`: 4-node linear tetrahedron.
+- `quad4`: 4-node bilinear quadrilateral for a 2D SG.
+- `tri3`: 3-node linear triangle for a 2D SG.
+- `line2`: 2-node linear line for a 1D SG.
+
+For MSG analyses, all element types use a three-component fluctuation field
+`w=[w1,w2,w3]`. Lower-dimensional elements simply restrict the fluctuation
+field to vary along selected SG coordinates. The macroscopic output shape is
+chosen by the analysis type, not by the SG dimension.
+
+```json
+{
+  "type": "hex8",
+  "nodes": [
+    [0, 0, 0],
+    [1, 0, 0],
+    [1, 1, 0],
+    [0, 1, 0],
+    [0, 0, 1],
+    [1, 0, 1],
+    [1, 1, 1],
+    [0, 1, 1]
+  ],
+  "elements": [
+    {"nodes": [0, 1, 2, 3, 4, 5, 6, 7], "material": "matrix"}
+  ]
+}
+```
+
+Hex8 node order is:
+
+```text
+0 (-,-,-), 1 (+,-,-), 2 (+,+,-), 3 (-,+,-),
+4 (-,-,+), 5 (+,-,+), 6 (+,+,+), 7 (-,+,+)
+```
+
+Tet4 node order follows the standard positively oriented reference tetrahedron:
+
+```text
+0 (0,0,0), 1 (1,0,0), 2 (0,1,0), 3 (0,0,1)
+```
+
+Physical elements must have positive Jacobian determinant. If a tetrahedron is
+read with reversed orientation, swap two nodes in that element.
+
+## Lower-Dimensional SG Meshes
+
+Use `active_axes` to state which physical axes are represented by the SG
+coordinates. Defaults follow common MSG conventions:
+
+- `line2`: `["z"]`, i.e. a 1D SG through thickness/axis 3.
+- `quad4` and `tri3`: `["y", "z"]`, i.e. a 2D SG over axes 2 and 3.
+- `hex8` and `tet4`: `["x", "y", "z"]`.
+
+A 1D homogeneous SG:
+
+```json
+{
+  "type": "line2",
+  "active_axes": ["z"],
+  "nodes": [[0], [1]],
+  "elements": [
+    {"nodes": [0, 1], "material": "matrix"}
+  ]
+}
+```
+
+A 2D SG in the `y-z` plane:
+
+```json
+{
+  "type": "quad4",
+  "active_axes": ["y", "z"],
+  "nodes": [[0, 0], [1, 0], [1, 1], [0, 1]],
+  "elements": [
+    {"nodes": [0, 1, 2, 3], "material": "matrix"}
+  ]
+}
+```
+
+When node coordinates have one or two columns, OpenMSG embeds them into the
+listed `active_axes`. Three-column coordinates may also be supplied directly,
+for example with constant `x` and varying `y,z`.
+
+## External Mesh Files
+
+External mesh files are read through `meshio`:
+
+```json
+"mesh": {
+  "type": "meshio",
+  "path": "cell.vtu",
+  "cell_type": "hexahedron",
+  "material_data": "gmsh:physical",
+  "material_map": {
+    "1": "matrix",
+    "2": "fiber"
+  }
+}
+```
+
+Use `"cell_type": "tetra"` for Tet4 meshes, `"quad"` or `"triangle"` for 2D SG
+meshes, and `"line"` for 1D SG meshes.
+
+Relative paths are resolved relative to the JSON file. If no material data is
+available, `default_material` is used.
+
+## Dehomogenization Request
+
+A config can optionally store macroscopic strains for local field recovery:
+
+```json
+"dehomogenization": {
+  "macro_strains": {
+    "unit_z": [0, 0, 0.01, 0, 0, 0]
+  }
+}
+```
+
+Programmatic users can call `openmsg.dehomogenize.recover_gauss_fields` with
+the `MSGResult.V0` matrix and a macroscopic generalized strain vector. The
+vector length follows the selected macroscopic model: 6 for Cauchy, 6 for
+Kirchhoff-Love plate, and 4 for Euler-Bernoulli beam.
