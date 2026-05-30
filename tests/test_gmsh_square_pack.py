@@ -204,7 +204,7 @@ class GmshSquarePackTests(unittest.TestCase):
                 {"type": "mean_zero"},
             ],
         )
-        cls.Dbar = cls.result.Dbar
+        cls.Dbar = cls.result.Dbar.detach().cpu().numpy()
         cls.constants = engineering_constants_from_stiffness(cls.Dbar)
 
         # Area-weighted fiber volume fraction realized in the discrete mesh.
@@ -320,7 +320,7 @@ class GmshSquarePack3DConsistencyTests(unittest.TestCase):
             material_stiffness=material_stiffness,
             macro_model="cauchy_3d",
             constraints=constraints,
-        ).Dbar
+        ).Dbar.detach().cpu().numpy()
 
         # 3D Tet4 SG — exact Python-level extrusion of the same 2D mesh
         cls.mesh_3d = _extrude_tri3_to_tet4(cls.mesh_2d, lz=1.0)
@@ -329,7 +329,7 @@ class GmshSquarePack3DConsistencyTests(unittest.TestCase):
             material_stiffness=material_stiffness,
             macro_model="cauchy_3d",
             constraints=constraints,
-        ).Dbar
+        ).Dbar.detach().cpu().numpy()
 
     def test_meshes_share_identical_cross_section(self) -> None:
         """The z=0 nodes of the 3D mesh must be bitwise-identical to the 2D nodes."""

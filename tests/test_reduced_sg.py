@@ -3,12 +3,14 @@ from __future__ import annotations
 import unittest
 
 import numpy as np
+import torch
 
+from openmsg.assembly import assemble_msg_system
 from openmsg.dehomogenize import recover_gauss_fields
-from openmsg.homogenize import homogenize_3d_cauchy
+from openmsg.homogenize import homogenize_msg
+from openmsg.macro import macro_model_from_kind
 from openmsg.materials import isotropic_stiffness
 from openmsg.mesh import SolidMesh, mesh_from_config
-from openmsg.assembly import assemble_3d_cauchy
 
 
 def line2_sg_mesh() -> SolidMesh:
@@ -54,12 +56,16 @@ def tri3_sg_mesh() -> SolidMesh:
     )
 
 
+def assemble_cauchy_system(mesh: SolidMesh, C: torch.Tensor):
+    return assemble_msg_system(mesh, {"m": C}, macro_model=macro_model_from_kind("cauchy_3d", mesh=mesh))
+
+
 class ReducedSGTests(unittest.TestCase):
     def test_lower_dimensional_sg_runs(self) -> None:
         mesh = line2_sg_mesh()
         C = isotropic_stiffness(100.0, 0.25)
 
-        result = homogenize_3d_cauchy(mesh=mesh, material_stiffness={"m": C})
+        result = homogenize_msg(mesh=mesh, material_stiffness={"m": C})
 
         self.assertEqual(result.metadata["assembly_kernel"], "tensormesh_autograd")
         np.testing.assert_allclose(result.Dbar, C, rtol=1e-10, atol=1e-10)
@@ -70,24 +76,25 @@ class ReducedSGTests(unittest.TestCase):
 
         for mesh in cases:
             with self.subTest(element_type=mesh.element_type):
-                assembly, metadata = assemble_3d_cauchy(mesh, {"m": C})
-                result = homogenize_3d_cauchy(mesh=mesh, material_stiffness={"m": C})
-                self.assertEqual(metadata["assembly_kernel"], "tensormesh_autograd")
-                np.testing.assert_allclose(assembly.E, assembly.E.T, atol=1e-11)
-                np.testing.assert_allclose(assembly.D0, C * assembly.volume, rtol=1e-12, atol=1e-12)
+                system = assemble_cauchy_system(mesh, C)
+                E = system.E.to_dense()
+                result = homogenize_msg(mesh=mesh, material_stiffness={"m": C})
+                self.assertEqual(system.metadata["assembly_kernel"], "tensormesh_autograd")
+                torch.testing.assert_close(E, E.T, rtol=0.0, atol=1e-11)
+                torch.testing.assert_close(system.D0, C * system.volume, rtol=1e-12, atol=1e-12)
                 np.testing.assert_allclose(result.Dbar, C, rtol=1e-10, atol=1e-10)
 
     def test_line2_homogeneous_sg_recovers_3d_cauchy_stiffness(self) -> None:
         mesh = line2_sg_mesh()
         C = isotropic_stiffness(100.0, 0.25)
 
-        assembly, _ = assemble_3d_cauchy(mesh, {"m": C})
-        result = homogenize_3d_cauchy(mesh=mesh, material_stiffness={"m": C})
+        system = assemble_cauchy_system(mesh, C)
+        result = homogenize_msg(mesh=mesh, material_stiffness={"m": C})
 
         self.assertEqual(mesh.sg_dimension, 1)
         self.assertEqual(mesh.active_axes, (2,))
-        self.assertAlmostEqual(assembly.volume, 1.0)
-        np.testing.assert_allclose(assembly.D0, C, rtol=1e-12, atol=1e-12)
+        self.assertAlmostEqual(float(system.volume), 1.0)
+        torch.testing.assert_close(system.D0, C, rtol=1e-12, atol=1e-12)
         np.testing.assert_allclose(result.Dbar, C, rtol=1e-10, atol=1e-10)
         self.assertEqual(result.metadata["sg_dimension"], 1)
         self.assertEqual(result.metadata["active_axes"], [2])
@@ -96,7 +103,7 @@ class ReducedSGTests(unittest.TestCase):
         mesh = quad4_sg_mesh()
         C = isotropic_stiffness(100.0, 0.25)
 
-        result = homogenize_3d_cauchy(mesh=mesh, material_stiffness={"m": C})
+        result = homogenize_msg(mesh=mesh, material_stiffness={"m": C})
 
         self.assertEqual(mesh.sg_dimension, 2)
         self.assertEqual(mesh.active_axes, (1, 2))
@@ -106,7 +113,7 @@ class ReducedSGTests(unittest.TestCase):
         mesh = tri3_sg_mesh()
         C = isotropic_stiffness(100.0, 0.25)
 
-        result = homogenize_3d_cauchy(mesh=mesh, material_stiffness={"m": C})
+        result = homogenize_msg(mesh=mesh, material_stiffness={"m": C})
 
         np.testing.assert_allclose(result.Dbar, C, rtol=1e-10, atol=1e-10)
 
@@ -121,7 +128,7 @@ class ReducedSGTests(unittest.TestCase):
 
         for mesh, expected_points in cases:
             with self.subTest(element_type=mesh.element_type):
-                result = homogenize_3d_cauchy(mesh=mesh, material_stiffness={"m": C})
+                result = homogenize_msg(mesh=mesh, material_stiffness={"m": C})
                 fields = recover_gauss_fields(
                     mesh=mesh,
                     material_stiffness={"m": C},

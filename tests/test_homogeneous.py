@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-from openmsg.homogenize import homogenize_3d_cauchy
+from openmsg.homogenize import homogenize_msg
 from openmsg.materials import isotropic_stiffness
 from tests.mesh_builders import structured_hex_mesh
 
@@ -14,7 +14,7 @@ class HomogeneousTests(unittest.TestCase):
         mesh = structured_hex_mesh(bounds=((0, 1), (0, 1), (0, 1)), cells=(1, 1, 1), default_material="m")
         C = isotropic_stiffness(100.0, 0.25)
 
-        result = homogenize_3d_cauchy(
+        result = homogenize_msg(
             mesh=mesh,
             material_stiffness={"m": C},
             constraints=[{"type": "periodic", "axes": ["x", "y", "z"]}, {"type": "mean_zero"}],

@@ -31,7 +31,7 @@ Kirchhoff-Love plate, and Euler-Bernoulli beam macroscopic models.
 Run it with:
 
 ```bash
-PYTHONPATH=src python -m openmsg examples/homogeneous_3d.json
+uv run python -m openmsg examples/homogeneous_3d.json
 ```
 
 ## Analysis Block
@@ -60,17 +60,22 @@ Supported MSG analysis types:
 
 The SG mesh may be 3D, 2D, or 1D for any of these macroscopic models when the
 geometry/material distribution is invariant by translation in the omitted
-directions. `laminate_abd` remains available as a separate analytical classical
-laminate ABD utility.
+directions. Analytical classical laminate ABD references belong in examples or
+tests, not in the JSON analysis API.
 
 MSG finite element assembly uses TensorMesh. There is no alternate assembly
 selector in the input format.
 
+Material definitions in JSON are converted to torch stiffness tensors before
+MSG assembly. The Python MSG assembly path expects each `material_stiffness`
+value to be a `torch.Tensor`; NumPy stiffness arrays are not accepted by the
+core solver.
+
 Linear solvers:
 
-- `auto`: use sparse saddle-point solving with the TensorMesh stiffness matrix.
-- `dense`: force dense NumPy block solving.
-- `sparse`: force scipy sparse saddle-point solving.
+- `auto`: use the TensorMesh / `torch-sla` sparse saddle-point solve.
+- `dense`: force dense PyTorch block solving.
+- `sparse`: force TensorMesh / `torch-sla` sparse saddle-point solving.
 
 Constraint shorthand is also accepted:
 
@@ -181,42 +186,6 @@ All stiffness matrices use Voigt order:
 ```text
 [e11, e22, e33, 2e23, 2e13, 2e12]
 ```
-
-## Analytical Laminate ABD Input
-
-For a classical laminate ABD calculation without an SG finite element solve:
-
-```json
-{
-  "analysis": {"type": "laminate_abd"},
-  "materials": {
-    "ud": {
-      "type": "orthotropic",
-      "E1": 140.0,
-      "E2": 10.0,
-      "E3": 10.0,
-      "nu12": 0.28,
-      "nu13": 0.28,
-      "nu23": 0.40,
-      "G12": 5.0,
-      "G13": 5.0,
-      "G23": 3.57
-    }
-  },
-  "laminate": {
-    "plies": [
-      {"material": "ud", "thickness": 0.125, "angle": 0},
-      {"material": "ud", "thickness": 0.125, "angle": 90},
-      {"material": "ud", "thickness": 0.125, "angle": 90},
-      {"material": "ud", "thickness": 0.125, "angle": 0}
-    ]
-  }
-}
-```
-
-The output contains `A`, `B`, `D`, and the assembled `ABD` matrix. Ply angles
-are in degrees and rotate the reduced in-plane stiffness before thickness
-integration.
 
 ## Explicit SG Mesh
 
@@ -345,6 +314,6 @@ A config can optionally store macroscopic strains for local field recovery:
 ```
 
 Programmatic users can call `openmsg.dehomogenize.recover_gauss_fields` with
-the `MSGResult.V0` matrix and a macroscopic generalized strain vector. The
-vector length follows the selected macroscopic model: 6 for Cauchy, 6 for
-Kirchhoff-Love plate, and 4 for Euler-Bernoulli beam.
+the torch-backed `MSGResult.V0` matrix and a macroscopic generalized strain
+vector. The vector length follows the selected macroscopic model: 6 for Cauchy,
+6 for Kirchhoff-Love plate, and 4 for Euler-Bernoulli beam.

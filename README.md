@@ -38,12 +38,13 @@ uv run python -m unittest discover -s tests
 ```
 
 OpenMSG uses TensorMesh for MSG finite element assembly. `linear_solver:
-"auto"` uses a sparse scipy saddle-point solve for the MSG constraint system.
+"auto"` uses the TensorMesh / `torch-sla` sparse saddle-point solve for the MSG
+constraint system.
 
 ## Python API
 
 ```python
-from openmsg import SolidMesh, homogenize_3d_cauchy, isotropic_stiffness
+from openmsg import SolidMesh, homogenize_msg, isotropic_stiffness
 
 mesh = SolidMesh(
     nodes=[
@@ -62,9 +63,10 @@ mesh = SolidMesh(
 )
 C = isotropic_stiffness(young=100.0, poisson=0.25)
 
-result = homogenize_3d_cauchy(
+result = homogenize_msg(
     mesh=mesh,
     material_stiffness={"matrix": C},
+    macro_model="cauchy_3d",
     constraints=[
         {"type": "periodic", "axes": ["x", "y", "z"]},
         {"type": "mean_zero"},
@@ -78,9 +80,13 @@ print(result.Dbar)
 
 The assembly and constrained solve are fully tensorized in PyTorch and
 differentiable. `effective_stiffness` returns the homogenized stiffness `Dbar`
-as a `torch.Tensor` with autograd history back to the material stiffness tensors
-and the node coordinates, so material or geometry parameters can be optimized
-with gradient descent.
+as a `torch.Tensor` with autograd history back to the material stiffness tensors.
+Material helper functions such as `isotropic_stiffness` return torch tensors.
+Direct Python calls to `homogenize_msg` and `effective_stiffness` expect these
+torch material tensors; NumPy stiffness arrays are rejected by assembly.
+Mesh node coordinates are treated as fixed SG geometry, but the assembled
+geometry, quadrature data, constraints, and normalization factors stay in torch
+tensors inside this path.
 
 ```python
 import torch
@@ -88,23 +94,23 @@ import torch
 from openmsg import effective_stiffness, isotropic_stiffness
 
 # mesh: a SolidMesh, as constructed in the Python API example above.
-C = torch.tensor(isotropic_stiffness(young=100.0, poisson=0.25), requires_grad=True)
-nodes = torch.tensor(mesh.nodes, dtype=torch.float64, requires_grad=True)
+young = torch.tensor(100.0, dtype=torch.float64, requires_grad=True)
+poisson = torch.tensor(0.25, dtype=torch.float64)
+C = isotropic_stiffness(young=young, poisson=poisson)
 
 result = effective_stiffness(
     mesh=mesh,
     material_stiffness={"matrix": C},
-    nodes=nodes,  # optional; omit to differentiate with respect to material only
     macro_model="cauchy_3d",
 )
 result.Dbar[0, 0].backward()  # any scalar objective on Dbar
-print(C.grad, nodes.grad)     # gradients with respect to material and geometry
+print(young.grad)             # gradient through the material stiffness formula
 ```
 
 The constrained saddle-point system is solved with the differentiable
-`torch-sla` sparse solver built into TensorMesh. `homogenize_msg` wraps
-`effective_stiffness` and returns a detached NumPy `MSGResult` for reporting and
-JSON output.
+`torch-sla` sparse solver built into TensorMesh. `homogenize_msg` and
+`effective_stiffness` both return the same PyTorch-backed `MSGResult`; JSON
+serialization converts tensors only at the `to_dict`/CLI boundary.
 
 ## Input Format
 
@@ -123,8 +129,9 @@ Set `analysis.type` to choose the macroscopic model:
 - `msg_euler_bernoulli_beam` returns a 4x4 beam section stiffness for
   `[e1, k1, k2, k3]`.
 
-The separate `laminate_abd` analysis is still available as an analytical
-classical laminate utility without an SG finite element solve.
+Analytical classical laminate ABD calculations are example/reference code only,
+not a core analysis type. See `examples/plate_msg_vs_laminate_abd.py` for a
+1D SG plate solve compared against a classical ABD reference.
 
 ## Square-Pack Benchmark
 

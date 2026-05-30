@@ -7,13 +7,9 @@ import numpy as np
 
 from openmsg.config import run_config
 from openmsg.dehomogenize import recover_gauss_fields
-from openmsg.homogenize import (
-    homogenize_euler_bernoulli_beam,
-    homogenize_kirchhoff_love_plate,
-)
+from openmsg.homogenize import homogenize_msg
 from openmsg.materials import isotropic_stiffness
 from openmsg.mesh import SolidMesh
-from openmsg.plate import Ply, laminate_abd
 from tests.mesh_builders import structured_hex_mesh
 
 
@@ -45,12 +41,25 @@ def rectangular_cross_section_mesh(n: int = 4) -> SolidMesh:
 
 
 class StructuralMSGTests(unittest.TestCase):
-    def test_line2_plate_msg_converges_to_laminate_abd(self) -> None:
+    def test_line2_plate_msg_matches_classical_single_layer_abd(self) -> None:
         mesh = line_thickness_mesh(n_elements=16)
-        C = isotropic_stiffness(100.0, 0.25)
-        expected = laminate_abd([Ply(C, thickness=1.0)]).ABD
+        young = 100.0
+        nu = 0.25
+        C = isotropic_stiffness(young, nu)
+        Q = young / (1.0 - nu**2) * np.array(
+            [
+                [1.0, nu, 0.0],
+                [nu, 1.0, 0.0],
+                [0.0, 0.0, 0.5 * (1.0 - nu)],
+            ]
+        )
+        expected = np.block([[Q, np.zeros((3, 3))], [np.zeros((3, 3)), Q / 12.0]])
 
-        result = homogenize_kirchhoff_love_plate(mesh=mesh, material_stiffness={"m": C})
+        result = homogenize_msg(
+            mesh=mesh,
+            material_stiffness={"m": C},
+            macro_model="kirchhoff_love_plate",
+        )
 
         self.assertEqual(result.metadata["macro_model"], "kirchhoff_love_plate")
         self.assertEqual(result.Dbar.shape, (6, 6))
@@ -63,13 +72,17 @@ class StructuralMSGTests(unittest.TestCase):
         young = 100.0
         C = isotropic_stiffness(young, 0.25)
 
-        result = homogenize_euler_bernoulli_beam(mesh=mesh, material_stiffness={"m": C})
+        result = homogenize_msg(
+            mesh=mesh,
+            material_stiffness={"m": C},
+            macro_model="euler_bernoulli_beam",
+        )
 
         self.assertEqual(result.metadata["macro_model"], "euler_bernoulli_beam")
         self.assertEqual(result.Dbar.shape, (4, 4))
-        self.assertAlmostEqual(result.Dbar[0, 0], young, places=10)
-        self.assertAlmostEqual(result.Dbar[2, 2], young / 12.0, delta=0.06)
-        self.assertAlmostEqual(result.Dbar[3, 3], young / 12.0, delta=0.06)
+        self.assertAlmostEqual(float(result.Dbar[0, 0]), young, places=10)
+        self.assertAlmostEqual(float(result.Dbar[2, 2]), young / 12.0, delta=0.06)
+        self.assertAlmostEqual(float(result.Dbar[3, 3]), young / 12.0, delta=0.06)
         np.testing.assert_allclose(result.Dbar, result.Dbar.T, atol=1e-10)
         self.assertEqual(result.to_dict()["K"], result.to_dict()["Dbar"])
 
@@ -81,8 +94,16 @@ class StructuralMSGTests(unittest.TestCase):
         )
         C = isotropic_stiffness(100.0, 0.25)
 
-        plate_result = homogenize_kirchhoff_love_plate(mesh=mesh, material_stiffness={"m": C})
-        beam_result = homogenize_euler_bernoulli_beam(mesh=mesh, material_stiffness={"m": C})
+        plate_result = homogenize_msg(
+            mesh=mesh,
+            material_stiffness={"m": C},
+            macro_model="kirchhoff_love_plate",
+        )
+        beam_result = homogenize_msg(
+            mesh=mesh,
+            material_stiffness={"m": C},
+            macro_model="euler_bernoulli_beam",
+        )
 
         self.assertEqual(plate_result.Dbar.shape, (6, 6))
         self.assertEqual(beam_result.Dbar.shape, (4, 4))
@@ -94,7 +115,11 @@ class StructuralMSGTests(unittest.TestCase):
     def test_plate_msg_dehomogenization_accepts_generalized_strain(self) -> None:
         mesh = line_thickness_mesh(n_elements=4)
         C = isotropic_stiffness(100.0, 0.25)
-        result = homogenize_kirchhoff_love_plate(mesh=mesh, material_stiffness={"m": C})
+        result = homogenize_msg(
+            mesh=mesh,
+            material_stiffness={"m": C},
+            macro_model="kirchhoff_love_plate",
+        )
         macro_strain = np.array([0.01, -0.02, 0.004, 0.1, -0.05, 0.02])
 
         fields = recover_gauss_fields(
@@ -155,14 +180,23 @@ class StructuralMSGTests(unittest.TestCase):
     def test_structural_msg_dense_solver_override_matches_sparse(self) -> None:
         C = isotropic_stiffness(100.0, 0.25)
         cases = [
-            (homogenize_kirchhoff_love_plate, line_thickness_mesh(n_elements=4)),
-            (homogenize_euler_bernoulli_beam, rectangular_cross_section_mesh(n=2)),
+            ("kirchhoff_love_plate", line_thickness_mesh(n_elements=4)),
+            ("euler_bernoulli_beam", rectangular_cross_section_mesh(n=2)),
         ]
 
-        for homogenize, mesh in cases:
-            with self.subTest(model=homogenize.__name__):
-                sparse_result = homogenize(mesh=mesh, material_stiffness={"m": C})
-                dense_result = homogenize(mesh=mesh, material_stiffness={"m": C}, linear_solver="dense")
+        for macro_model, mesh in cases:
+            with self.subTest(model=macro_model):
+                sparse_result = homogenize_msg(
+                    mesh=mesh,
+                    material_stiffness={"m": C},
+                    macro_model=macro_model,
+                )
+                dense_result = homogenize_msg(
+                    mesh=mesh,
+                    material_stiffness={"m": C},
+                    macro_model=macro_model,
+                    linear_solver="dense",
+                )
                 self.assertEqual(sparse_result.metadata["assembly_kernel"], "tensormesh_autograd")
                 np.testing.assert_allclose(dense_result.Dbar, sparse_result.Dbar, rtol=1e-10, atol=1e-10)
                 np.testing.assert_allclose(dense_result.H, sparse_result.H, rtol=1e-12, atol=1e-12)

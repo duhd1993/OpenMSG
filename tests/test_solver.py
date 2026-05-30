@@ -12,6 +12,10 @@ def _np(tensor) -> np.ndarray:
     return tensor.detach().cpu().numpy()
 
 
+def _t(value) -> torch.Tensor:
+    return torch.as_tensor(value, dtype=torch.float64)
+
+
 class SolverTests(unittest.TestCase):
     def test_unconstrained_dbar_matches_schur_formula(self) -> None:
         rng = np.random.default_rng(42)
@@ -21,11 +25,11 @@ class SolverTests(unittest.TestCase):
         B = rng.normal(size=(6, 6))
         D0 = B.T @ B + 10.0 * np.eye(6)
 
-        V0 = solve_constrained(E, H)
+        V0 = solve_constrained(_t(E), _t(H))
         expected_v0 = -np.linalg.solve(E, H)
         np.testing.assert_allclose(_np(V0), expected_v0, rtol=1e-10, atol=1e-10)
 
-        Dbar = compute_effective_stiffness(D0, H, V0)
+        Dbar = compute_effective_stiffness(_t(D0), _t(H), V0)
         expected = D0 - H.T @ np.linalg.solve(E, H)
         expected = 0.5 * (expected + expected.T)
         np.testing.assert_allclose(_np(Dbar), expected, rtol=1e-10, atol=1e-10)
@@ -37,7 +41,7 @@ class SolverTests(unittest.TestCase):
         H = rng.normal(size=(5, 6))
         G = np.array([[1.0, 0.0, 0.0, 0.0, 0.0], [0.0, 1.0, 1.0, 0.0, 0.0]])
 
-        V0 = solve_constrained(E, H, G)
+        V0 = solve_constrained(_t(E), _t(H), _t(G))
         np.testing.assert_allclose(G @ _np(V0), np.zeros((2, 6)), atol=1e-10)
 
     def test_sparse_constrained_solution_matches_dense(self) -> None:
@@ -47,8 +51,8 @@ class SolverTests(unittest.TestCase):
         H = rng.normal(size=(8, 6))
         G = np.array([[1.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0, -1.0, 0.0, 0.0, 0.0]])
 
-        dense_v0, dense_lagrange = solve_constrained(E, H, G, return_lagrange=True)
-        sparse_v0, sparse_lagrange = solve_constrained_sparse(E, H, G, return_lagrange=True)
+        dense_v0, dense_lagrange = solve_constrained(_t(E), _t(H), _t(G), return_lagrange=True)
+        sparse_v0, sparse_lagrange = solve_constrained_sparse(_t(E), _t(H), _t(G), return_lagrange=True)
 
         np.testing.assert_allclose(_np(sparse_v0), _np(dense_v0), rtol=1e-9, atol=1e-9)
         np.testing.assert_allclose(_np(sparse_lagrange), _np(dense_lagrange), rtol=1e-9, atol=1e-9)

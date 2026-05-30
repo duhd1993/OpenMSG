@@ -13,7 +13,6 @@ from openmsg.homogenize import MSGResult, homogenize_msg
 from openmsg.macro import default_constraints_for_macro_model, macro_model_from_analysis
 from openmsg.materials import stiffness_from_config
 from openmsg.mesh import mesh_from_config
-from openmsg.plate import LaminateABDResult, laminate_abd_from_config
 
 
 def load_config(path: str | Path) -> dict[str, Any]:
@@ -23,7 +22,7 @@ def load_config(path: str | Path) -> dict[str, Any]:
         return json.load(f)
 
 
-def run_config(config_or_path: dict[str, Any] | str | Path) -> MSGResult | LaminateABDResult:
+def run_config(config_or_path: dict[str, Any] | str | Path) -> MSGResult:
     """Run an OpenMSG analysis from a loaded config or JSON file path."""
 
     base_dir: Path | None = None
@@ -42,11 +41,6 @@ def run_config(config_or_path: dict[str, Any] | str | Path) -> MSGResult | Lamin
     }
     if not materials:
         raise ValueError("at least one material is required")
-    if analysis_type in {"laminate_abd", "kirchhoff_love_laminate"}:
-        result = laminate_abd_from_config(materials=materials, laminate=config["laminate"])
-        if "metadata" in config:
-            result.metadata["input_metadata"] = config["metadata"]
-        return result
     supported_msg_types = {
         "msg",
         "msg_3d_cauchy",
@@ -61,7 +55,7 @@ def run_config(config_or_path: dict[str, Any] | str | Path) -> MSGResult | Lamin
     if analysis_type not in supported_msg_types:
         raise ValueError(
             "supported analysis types are 'msg_3d_cauchy', 'msg_kirchhoff_love_plate', "
-            "'msg_euler_bernoulli_beam', and 'laminate_abd'"
+            "and 'msg_euler_bernoulli_beam'"
         )
     if "backend" in analysis:
         raise ValueError("analysis.backend has been removed; OpenMSG uses TensorMesh assembly directly")
@@ -93,7 +87,7 @@ def run_config(config_or_path: dict[str, Any] | str | Path) -> MSGResult | Lamin
     return result
 
 
-def write_result_json(result: MSGResult | LaminateABDResult, path: str | Path, *, include_internal: bool = False) -> None:
+def write_result_json(result: MSGResult, path: str | Path, *, include_internal: bool = False) -> None:
     """Write a result JSON file."""
 
     output = result.to_dict(include_internal=include_internal)
@@ -102,7 +96,7 @@ def write_result_json(result: MSGResult | LaminateABDResult, path: str | Path, *
         f.write("\n")
 
 
-def result_to_json(result: MSGResult | LaminateABDResult, *, include_internal: bool = False) -> str:
+def result_to_json(result: MSGResult, *, include_internal: bool = False) -> str:
     """Return a formatted JSON string for a result."""
 
     return json.dumps(result.to_dict(include_internal=include_internal), indent=2)

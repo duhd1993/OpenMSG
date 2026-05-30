@@ -6,15 +6,15 @@ import numpy as np
 
 from openmsg.assembly import _element_stiffness_stack, _voigt_b_from_grad3d, tensormesh_quadrature
 from openmsg.macro import MacroModel, macro_model_from_kind
-from openmsg.mesh import HexMesh
+from openmsg.mesh import SolidMesh
 
 
 def recover_gauss_fields(
     *,
-    mesh: HexMesh,
-    material_stiffness: dict[str, np.ndarray],
-    V0: np.ndarray,
-    macro_strain: np.ndarray,
+    mesh: SolidMesh,
+    material_stiffness: dict[str, object],
+    V0: object,
+    macro_strain: object,
     macro_model: str | MacroModel = "cauchy_3d",
 ) -> dict[str, np.ndarray]:
     """Recover local strain and stress at all element quadrature points.
@@ -22,26 +22,27 @@ def recover_gauss_fields(
     Uses the shared TensorMesh quadrature primitive
     (:func:`openmsg.assembly.tensormesh_quadrature`); the returned NumPy arrays
     are ordered element-major (all quadrature points of element 0, then 1, ...).
+    ``material_stiffness`` values must be 6x6 torch tensors.
     """
 
     import torch
 
     model = macro_model_from_kind(macro_model, mesh=mesh)
-    eps_bar = np.asarray(macro_strain, dtype=float)
-    if eps_bar.shape != (model.n_macro,):
-        raise ValueError(f"macro_strain must have shape ({model.n_macro},)")
-    V0 = np.asarray(V0, dtype=float)
-    if V0.shape != (mesh.n_dof, model.n_macro):
-        raise ValueError(f"V0 must have shape (mesh.n_dof, {model.n_macro})")
 
     dtype = torch.float64
-    nodes_t, tm_data, blocks = tensormesh_quadrature(mesh, dtype=dtype)
-    device = nodes_t.device
+    tm_data, blocks = tensormesh_quadrature(mesh, dtype=dtype)
+    device = blocks[0].jxw.device
+    eps_bar_t = _as_torch_tensor(macro_strain, torch, dtype=dtype, device=device)
+    if tuple(eps_bar_t.shape) != (model.n_macro,):
+        raise ValueError(f"macro_strain must have shape ({model.n_macro},)")
+    V0_t = _as_torch_tensor(V0, torch, dtype=dtype, device=device)
+    if tuple(V0_t.shape) != (mesh.n_dof, model.n_macro):
+        raise ValueError(f"V0 must have shape (mesh.n_dof, {model.n_macro})")
+
     C_element = _element_stiffness_stack(
         mesh, material_stiffness, tm_data, torch, dtype=dtype, device=device
     )
-    eps_bar_t = torch.as_tensor(eps_bar, dtype=dtype, device=device)
-    fluctuation = torch.as_tensor(V0 @ eps_bar, dtype=dtype, device=device)  # [n_dof]
+    fluctuation = V0_t @ eps_bar_t  # [n_dof]
 
     points: list[np.ndarray] = []
     strains: list[np.ndarray] = []
@@ -58,7 +59,7 @@ def recover_gauss_fields(
         elem_dofs = (3 * conn.unsqueeze(-1) + comp)  # [n_e, n_basis, 3]
         w_elem = fluctuation[elem_dofs]  # [n_e, n_basis, 3]
 
-        B_macro = model.strain_modes_batch(block.points, torch)  # [n_e, n_q, 6, n_macro]
+        B_macro = model.strain_modes(block.points)  # [n_e, n_q, 6, n_macro]
         strain = torch.einsum("eqbic,ebc->eqi", B_node, w_elem) + torch.einsum(
             "eqik,k->eqi", B_macro, eps_bar_t
         )  # [n_e, n_q, 6]
@@ -78,3 +79,9 @@ def recover_gauss_fields(
         "strain": np.concatenate(strains).astype(float),
         "stress": np.concatenate(stresses).astype(float),
     }
+
+
+def _as_torch_tensor(value: object, torch: object, *, dtype: object, device: object):
+    if isinstance(value, torch.Tensor):
+        return value.to(dtype=dtype, device=device)
+    return torch.as_tensor(np.asarray(value, dtype=float), dtype=dtype, device=device)

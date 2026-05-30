@@ -84,7 +84,7 @@ class ConfigTests(unittest.TestCase):
             )
             output.write_text(__import__("json").dumps(config), encoding="utf-8")
             result = run_config(output)
-            self.assertGreater(result.Dbar[2, 2], result.Dbar[0, 0])
+            self.assertGreater(float(result.Dbar[2, 2]), float(result.Dbar[0, 0]))
 
     def test_analysis_backend_field_is_rejected(self) -> None:
         config = {

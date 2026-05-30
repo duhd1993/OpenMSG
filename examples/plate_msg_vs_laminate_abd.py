@@ -1,11 +1,18 @@
-"""Kirchhoff-Love laminate ABD utilities for 1D SG plate models."""
+"""Compare a 1D MSG Kirchhoff-Love plate solve with classical laminate ABD.
+
+This is intentionally an example-level reference calculation, not part of the
+OpenMSG solver API. The core library only solves MSG problems.
+"""
 
 from __future__ import annotations
 
+import argparse
 from dataclasses import dataclass, field
 import math
 
 import numpy as np
+
+from openmsg import SolidMesh, homogenize_msg, isotropic_stiffness
 
 
 IN_PLANE = np.array([0, 1, 5], dtype=int)
@@ -14,9 +21,9 @@ OUT_OF_PLANE = np.array([2, 3, 4], dtype=int)
 
 @dataclass(frozen=True)
 class Ply:
-    """A laminate ply definition."""
+    """A classical laminate ply used by this example's reference calculation."""
 
-    stiffness: np.ndarray
+    stiffness: object
     thickness: float
     angle_deg: float = 0.0
     material: str | None = None
@@ -24,7 +31,7 @@ class Ply:
 
 @dataclass(frozen=True)
 class LaminateABDResult:
-    """ABD result for a Kirchhoff-Love laminate."""
+    """Classical laminate ABD result for this example."""
 
     A: np.ndarray
     B: np.ndarray
@@ -34,29 +41,21 @@ class LaminateABDResult:
     Qbar: list[np.ndarray]
     metadata: dict[str, object] = field(default_factory=dict)
 
-    def to_dict(self, *, include_internal: bool = False) -> dict[str, object]:
-        data: dict[str, object] = {
-            "A": self.A.tolist(),
-            "B": self.B.tolist(),
-            "D": self.D.tolist(),
-            "ABD": self.ABD.tolist(),
-            "z": self.z.tolist(),
-            "metadata": self.metadata,
-        }
-        if include_internal:
-            data["Qbar"] = [Q.tolist() for Q in self.Qbar]
-        return data
+
+@dataclass(frozen=True)
+class PlateComparison:
+    """MSG-vs-classical comparison data."""
+
+    ABD_msg: np.ndarray
+    ABD_reference: np.ndarray
+    max_abs_error: float
+    relative_error: float
 
 
-def plane_stress_reduced_stiffness(C: np.ndarray) -> np.ndarray:
-    """Return the in-plane plane-stress stiffness ``Q``.
+def plane_stress_reduced_stiffness(C: object) -> np.ndarray:
+    """Return the reduced in-plane plane-stress stiffness in [e11, e22, 2e12] order."""
 
-    The returned order is ``[e11, e22, 2e12]`` mapped to
-    ``[s11, s22, s12]``. If a 3x3 matrix is passed, it is assumed to already be
-    in this reduced order.
-    """
-
-    stiffness = np.asarray(C, dtype=float)
+    stiffness = _as_numpy_array(C)
     if stiffness.shape == (3, 3):
         return _assert_symmetric_3x3(stiffness)
     if stiffness.shape != (6, 6):
@@ -84,7 +83,7 @@ def transform_reduced_stiffness_inplane(Q: np.ndarray, angle_deg: float) -> np.n
 
 
 def laminate_abd(plies: list[Ply], *, z_bottom: float | None = None) -> LaminateABDResult:
-    """Compute Kirchhoff-Love laminate ``A``, ``B``, and ``D`` matrices."""
+    """Compute the classical Kirchhoff-Love laminate ABD reference matrix."""
 
     if not plies:
         raise ValueError("at least one ply is required")
@@ -119,40 +118,72 @@ def laminate_abd(plies: list[Ply], *, z_bottom: float | None = None) -> Laminate
         z=z,
         Qbar=qbars,
         metadata={
-            "model": "kirchhoff_love_laminate",
+            "model": "classical_laminate_reference",
             "n_plies": len(plies),
             "total_thickness": total_thickness,
         },
     )
 
 
-def laminate_abd_from_config(
-    *,
-    materials: dict[str, np.ndarray],
-    laminate: dict[str, object],
-) -> LaminateABDResult:
-    """Build a laminate ABD result from a config laminate block."""
+def line_thickness_mesh(*, thickness: float = 1.0, n_elements: int = 16) -> SolidMesh:
+    """Build a simple 1D thickness SG mesh for the comparison."""
 
-    plies: list[Ply] = []
-    for item in laminate.get("plies", []):  # type: ignore[union-attr]
-        if not isinstance(item, dict):
-            raise ValueError("each laminate ply must be an object")
-        material = str(item["material"])
-        if material not in materials:
-            raise KeyError(f"laminate references undefined material {material!r}")
-        plies.append(
-            Ply(
-                stiffness=materials[material],
-                thickness=float(item["thickness"]),
-                angle_deg=float(item.get("angle", item.get("angle_deg", 0.0))),
-                material=material,
-            )
-        )
-    z_bottom = laminate.get("z_bottom")
-    result = laminate_abd(plies, z_bottom=None if z_bottom is None else float(z_bottom))
-    result.metadata["materials"] = [ply.material for ply in plies]
-    result.metadata["angles_deg"] = [ply.angle_deg for ply in plies]
-    return result
+    z = np.linspace(-0.5 * thickness, 0.5 * thickness, n_elements + 1)
+    nodes = np.array([[0.0, 0.0, zi] for zi in z], dtype=float)
+    elements = np.array([[idx, idx + 1] for idx in range(n_elements)], dtype=int)
+    return SolidMesh(nodes=nodes, elements=elements, material_ids=("m",) * n_elements, element_type="line2")
+
+
+def run_single_layer_comparison(
+    *,
+    young: float = 100.0,
+    nu: float = 0.25,
+    thickness: float = 1.0,
+    n_elements: int = 16,
+) -> PlateComparison:
+    """Compare MSG plate ABD with the classical ABD of one centered isotropic layer."""
+
+    stiffness = isotropic_stiffness(young, nu)
+    mesh = line_thickness_mesh(thickness=thickness, n_elements=n_elements)
+    msg = homogenize_msg(mesh=mesh, material_stiffness={"m": stiffness}, macro_model="kirchhoff_love_plate")
+    reference = laminate_abd([Ply(stiffness=stiffness, thickness=thickness)])
+    msg_abd = msg.Dbar.detach().cpu().numpy()
+    diff = msg_abd - reference.ABD
+    max_abs_error = float(np.max(np.abs(diff)))
+    scale = max(float(np.max(np.abs(reference.ABD))), 1.0)
+    return PlateComparison(
+        ABD_msg=msg_abd,
+        ABD_reference=reference.ABD,
+        max_abs_error=max_abs_error,
+        relative_error=max_abs_error / scale,
+    )
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--elements", type=int, default=16, help="Number of Line2 elements through thickness.")
+    parser.add_argument("--young", type=float, default=100.0, help="Young's modulus for the isotropic layer.")
+    parser.add_argument("--nu", type=float, default=0.25, help="Poisson ratio for the isotropic layer.")
+    parser.add_argument("--thickness", type=float, default=1.0, help="Plate thickness.")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    comparison = run_single_layer_comparison(
+        young=args.young,
+        nu=args.nu,
+        thickness=args.thickness,
+        n_elements=args.elements,
+    )
+    np.set_printoptions(precision=8, suppress=True)
+    print("MSG ABD:")
+    print(comparison.ABD_msg)
+    print("\nClassical laminate ABD reference:")
+    print(comparison.ABD_reference)
+    print(f"\nmax_abs_error: {comparison.max_abs_error:.6e}")
+    print(f"relative_error: {comparison.relative_error:.6e}")
+    return 0
 
 
 def _inplane_strain_transform(axes: np.ndarray) -> np.ndarray:
@@ -181,3 +212,12 @@ def _assert_symmetric_3x3(Q: np.ndarray) -> np.ndarray:
         raise ValueError("reduced stiffness must be symmetric")
     return matrix
 
+
+def _as_numpy_array(value: object) -> np.ndarray:
+    if hasattr(value, "detach"):
+        return value.detach().cpu().numpy()
+    return np.asarray(value, dtype=float)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -81,9 +81,6 @@ class SolidMesh:
         return ELEMENT_DIMENSIONS[self.element_type]
 
 
-HexMesh = SolidMesh
-
-
 def mesh_from_config(config: dict[str, object], *, base_dir: str | Path | None = None) -> SolidMesh:
     """Create a mesh from a JSON mesh block."""
 

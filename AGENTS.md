@@ -18,18 +18,22 @@ The current implementation scope is intentionally small:
 - TensorMesh-backed assembly and solve for supported 1D/2D/3D SG elements. The
   pipeline is fully tensorized in PyTorch and differentiable: `effective_stiffness`
   returns `Dbar` as a `torch.Tensor` with autograd history back to the material
-  stiffness tensors and the node-coordinate tensor (pass either with
-  `requires_grad=True`). The constrained saddle-point system is solved with the
-  differentiable `torch-sla` sparse solver (`SparseMatrix.solve(method="lu")`).
-  `homogenize_msg` wraps `effective_stiffness` and returns a detached NumPy
-  `MSGResult` for reporting. The former hand-written NumPy assembly/solve path
-  has been removed.
+  stiffness tensors. Material helpers return torch tensors; assembly expects
+  each `material_stiffness` value to be a `torch.Tensor` and rejects NumPy
+  stiffness arrays. SG node coordinates are treated as fixed mesh geometry, but
+  geometry-derived quadrature data, constraints, and normalization factors stay
+  in torch tensors in the core solve. The constrained saddle-point system is
+  solved with the differentiable `torch-sla` sparse solver
+  (`SparseMatrix.solve(method="lu")`).
+  `homogenize_msg` and `effective_stiffness` return the same PyTorch-backed
+  `MSGResult`; tensor-to-list conversion happens only at the `to_dict`/CLI
+  serialization boundary. The former hand-written NumPy assembly/solve path and
+  NumPy-facing result wrappers have been removed.
 - Explicit input meshes are preferred. Mesh generation belongs in examples,
   tests, or external preprocessing scripts, not in the solver core.
-- `analysis.type: "laminate_abd"` is the implemented analytical classical
-  laminate ABD utility. Maintain this path, but do not confuse it with
-  `analysis.type: "msg_kirchhoff_love_plate"`, which performs an SG finite
-  element solve and outputs plate `ABD`.
+- Analytical classical laminate ABD helpers are examples/reference code only.
+  Do not expose `laminate_abd` as a core API or JSON analysis type; use such
+  references only to validate MSG plate outputs.
 
 Do not add shell, nonlinear, damage, large-deformation, Reissner-Mindlin plate,
 Timoshenko beam, or other new macroscopic models unless explicitly requested.

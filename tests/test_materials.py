@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-import numpy as np
+import torch
 
 from openmsg.materials import (
     cubic_stiffness,
@@ -22,13 +22,14 @@ class MaterialTests(unittest.TestCase):
         mu = young / (2.0 * (1.0 + nu))
 
         self.assertEqual(C.shape, (6, 6))
-        np.testing.assert_allclose(C, C.T)
-        self.assertAlmostEqual(C[0, 1], lam)
-        self.assertAlmostEqual(C[0, 0], lam + 2.0 * mu)
-        self.assertAlmostEqual(C[3, 3], mu)
-        self.assertAlmostEqual(C[4, 4], mu)
-        self.assertAlmostEqual(C[5, 5], mu)
-        self.assertGreater(np.min(np.linalg.eigvalsh(C)), 0.0)
+        self.assertIsInstance(C, torch.Tensor)
+        torch.testing.assert_close(C, C.T)
+        self.assertAlmostEqual(float(C[0, 1]), lam)
+        self.assertAlmostEqual(float(C[0, 0]), lam + 2.0 * mu)
+        self.assertAlmostEqual(float(C[3, 3]), mu)
+        self.assertAlmostEqual(float(C[4, 4]), mu)
+        self.assertAlmostEqual(float(C[5, 5]), mu)
+        self.assertGreater(float(torch.linalg.eigvalsh(C).min()), 0.0)
 
     def test_other_material_symmetries_are_positive_definite(self) -> None:
         cubic = cubic_stiffness(c11=250.0, c12=120.0, c44=80.0)
@@ -46,13 +47,23 @@ class MaterialTests(unittest.TestCase):
         ti_z = transversely_isotropic_stiffness(E_l=140.0, E_t=10.0, nu_lt=0.28, nu_tt=0.4, G_lt=5.0, axis="z")
 
         for C in (cubic, ortho, ti_z):
-            np.testing.assert_allclose(C, C.T, atol=1e-12)
-            self.assertGreater(np.min(np.linalg.eigvalsh(C)), 0.0)
+            self.assertIsInstance(C, torch.Tensor)
+            torch.testing.assert_close(C, C.T, atol=1e-12, rtol=0.0)
+            self.assertGreater(float(torch.linalg.eigvalsh(C).min()), 0.0)
 
         constants = engineering_constants_from_stiffness(ti_z)
         self.assertAlmostEqual(constants["E_z"], 140.0)
         self.assertAlmostEqual(constants["E_x"], 10.0)
         self.assertAlmostEqual(constants["E_y"], 10.0)
+
+    def test_isotropic_stiffness_preserves_parameter_autograd(self) -> None:
+        young = torch.tensor(210.0, dtype=torch.float64, requires_grad=True)
+        C = isotropic_stiffness(young, 0.3)
+
+        C[0, 0].backward()
+
+        self.assertIsNotNone(young.grad)
+        self.assertGreater(float(young.grad), 0.0)
 
 
 if __name__ == "__main__":

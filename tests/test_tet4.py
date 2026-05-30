@@ -3,12 +3,14 @@ from __future__ import annotations
 import unittest
 
 import numpy as np
+import torch
 
+from openmsg.assembly import assemble_msg_system
 from openmsg.dehomogenize import recover_gauss_fields
-from openmsg.homogenize import homogenize_3d_cauchy
+from openmsg.homogenize import homogenize_msg
+from openmsg.macro import macro_model_from_kind
 from openmsg.materials import isotropic_stiffness
 from openmsg.mesh import SolidMesh, mesh_from_config
-from openmsg.assembly import assemble_3d_cauchy
 
 
 def cube_tet_mesh() -> SolidMesh:
@@ -48,20 +50,20 @@ class Tet4Tests(unittest.TestCase):
             element_type="tet4",
         )
         C = isotropic_stiffness(100.0, 0.25)
-        assembly, metadata = assemble_3d_cauchy(mesh, {"m": C})
+        system = assemble_msg_system(mesh, {"m": C}, macro_model=macro_model_from_kind("cauchy_3d", mesh=mesh))
 
-        self.assertEqual(metadata["assembly_kernel"], "tensormesh_autograd")
-        self.assertEqual(assembly.E.shape, (12, 12))
-        self.assertEqual(assembly.H.shape, (12, 6))
-        self.assertAlmostEqual(assembly.volume, 1.0 / 6.0)
-        np.testing.assert_allclose(assembly.D0, C / 6.0, rtol=1e-12, atol=1e-12)
-        self.assertAlmostEqual(float(np.sum(assembly.node_weights)), 1.0 / 6.0)
+        self.assertEqual(system.metadata["assembly_kernel"], "tensormesh_autograd")
+        self.assertEqual(tuple(system.E.to_dense().shape), (12, 12))
+        self.assertEqual(tuple(system.H.shape), (12, 6))
+        self.assertAlmostEqual(float(system.volume), 1.0 / 6.0)
+        torch.testing.assert_close(system.D0, C / 6.0, rtol=1e-12, atol=1e-12)
+        self.assertAlmostEqual(float(system.node_weights.sum()), 1.0 / 6.0)
 
     def test_tet4_homogeneous_periodic_cube_recovers_input_stiffness(self) -> None:
         mesh = cube_tet_mesh()
         C = isotropic_stiffness(100.0, 0.25)
 
-        result = homogenize_3d_cauchy(mesh=mesh, material_stiffness={"m": C})
+        result = homogenize_msg(mesh=mesh, material_stiffness={"m": C})
 
         np.testing.assert_allclose(result.Dbar, C, rtol=1e-10, atol=1e-10)
         self.assertEqual(result.metadata["n_elements"], 6)
@@ -69,7 +71,7 @@ class Tet4Tests(unittest.TestCase):
     def test_tet4_dehomogenization_uses_tensormesh_quadrature_points(self) -> None:
         mesh = cube_tet_mesh()
         C = isotropic_stiffness(100.0, 0.25)
-        result = homogenize_3d_cauchy(mesh=mesh, material_stiffness={"m": C})
+        result = homogenize_msg(mesh=mesh, material_stiffness={"m": C})
         macro_strain = np.array([0.01, -0.02, 0.03, 0.004, -0.005, 0.006])
 
         fields = recover_gauss_fields(mesh=mesh, material_stiffness={"m": C}, V0=result.V0, macro_strain=macro_strain)

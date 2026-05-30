@@ -39,92 +39,30 @@ class MacroModel:
             return "msg_euler_bernoulli_beam"
         return f"msg_{self.kind}"
 
-    def strain_modes(self, point: np.ndarray) -> np.ndarray:
-        """Return the local 3D Voigt strain modes at a physical SG point."""
+    def strain_modes(self, points: object) -> object:
+        """Return local 3D Voigt strain modes for torch point batches.
 
-        y = np.asarray(point, dtype=float)
-        if y.shape != (3,):
-            raise ValueError("point must have shape (3,)")
-        if self.kind == "cauchy_3d":
-            return np.eye(6, dtype=float)
-        if self.kind == "kirchhoff_love_plate":
-            z = y[self.thickness_axis] - self.reference_point[self.thickness_axis]
-            modes = np.zeros((6, 6), dtype=float)
-            modes[0, 0] = 1.0
-            modes[1, 1] = 1.0
-            modes[5, 2] = 1.0
-            modes[0, 3] = z
-            modes[1, 4] = z
-            modes[5, 5] = z
-            return modes
-        if self.kind == "euler_bernoulli_beam":
-            y2_axis, y3_axis = self.cross_section_axes
-            y2 = y[y2_axis] - self.reference_point[y2_axis]
-            y3 = y[y3_axis] - self.reference_point[y3_axis]
-            modes = np.zeros((6, 4), dtype=float)
-            modes[0, 0] = 1.0
-            modes[4, 1] = y2
-            modes[5, 1] = -y3
-            modes[0, 2] = y3
-            modes[0, 3] = -y2
-            return modes
-        raise ValueError(f"unsupported macro model {self.kind!r}")
-
-    def strain_modes_torch(self, point: object, torch: object) -> object:
-        """Torch equivalent of :meth:`strain_modes` for TensorMesh assembly."""
-
-        zero = point.new_zeros(())  # type: ignore[attr-defined]
-        one = zero + 1.0
-        if self.kind == "cauchy_3d":
-            return torch.eye(6, dtype=point.dtype, device=point.device)  # type: ignore[attr-defined]
-        if self.kind == "kirchhoff_love_plate":
-            z = point[self.thickness_axis] - self.reference_point[self.thickness_axis]  # type: ignore[index]
-            return torch.stack(
-                [
-                    torch.stack([one, zero, zero, z, zero, zero]),
-                    torch.stack([zero, one, zero, zero, z, zero]),
-                    torch.stack([zero, zero, zero, zero, zero, zero]),
-                    torch.stack([zero, zero, zero, zero, zero, zero]),
-                    torch.stack([zero, zero, zero, zero, zero, zero]),
-                    torch.stack([zero, zero, one, zero, zero, z]),
-                ]
-            )
-        if self.kind == "euler_bernoulli_beam":
-            y2_axis, y3_axis = self.cross_section_axes
-            y2 = point[y2_axis] - self.reference_point[y2_axis]  # type: ignore[index]
-            y3 = point[y3_axis] - self.reference_point[y3_axis]  # type: ignore[index]
-            return torch.stack(
-                [
-                    torch.stack([one, zero, y3, -y2]),
-                    torch.stack([zero, zero, zero, zero]),
-                    torch.stack([zero, zero, zero, zero]),
-                    torch.stack([zero, zero, zero, zero]),
-                    torch.stack([zero, y2, zero, zero]),
-                    torch.stack([zero, -y3, zero, zero]),
-                ]
-            )
-        raise ValueError(f"unsupported macro model {self.kind!r}")
-
-    def strain_modes_batch(self, points: object, torch: object) -> object:
-        """Vectorized :meth:`strain_modes_torch` over a batch of SG points.
-
-        ``points`` has shape ``[..., 3]`` (physical SG coordinates) and the
-        return value has shape ``[..., 6, n_macro]``. This is the differentiable
-        kernel used by the autograd assembly path; gradients flow through the
-        point coordinates for geometry-dependent macro models.
+        ``points`` has shape ``[..., 3]`` and the output has shape
+        ``[..., 6, n_macro]``. Internal assembly passes all quadrature points as
+        one batch, e.g. ``[n_element, n_quad, 3]``.
         """
 
-        batch = tuple(points.shape[:-1])  # type: ignore[attr-defined]
-        dtype = points.dtype  # type: ignore[attr-defined]
-        device = points.device  # type: ignore[attr-defined]
-        if self.kind == "cauchy_3d":
-            eye = torch.eye(6, dtype=dtype, device=device)
-            return eye.broadcast_to((*batch, 6, 6))
+        import torch
 
-        zero = torch.zeros(batch, dtype=dtype, device=device)
-        one = torch.ones(batch, dtype=dtype, device=device)
+        if not isinstance(points, torch.Tensor):
+            raise TypeError("points must be a torch.Tensor")
+        if points.ndim < 1 or points.shape[-1] != 3:
+            raise ValueError("points must have shape (..., 3)")
+        batch = tuple(points.shape[:-1])
+        if self.kind == "cauchy_3d":
+            eye = torch.eye(6, dtype=points.dtype, device=points.device)
+            return eye.expand(*batch, 6, 6)
+
+        zero = points.new_zeros(batch)
+        one = zero + 1.0
+
         if self.kind == "kirchhoff_love_plate":
-            z = points[..., self.thickness_axis] - self.reference_point[self.thickness_axis]  # type: ignore[index]
+            z = points[..., self.thickness_axis] - self.reference_point[self.thickness_axis]
             rows = [
                 [one, zero, zero, z, zero, zero],
                 [zero, one, zero, zero, z, zero],
@@ -136,8 +74,8 @@ class MacroModel:
             return torch.stack([torch.stack(row, dim=-1) for row in rows], dim=-2)
         if self.kind == "euler_bernoulli_beam":
             y2_axis, y3_axis = self.cross_section_axes
-            y2 = points[..., y2_axis] - self.reference_point[y2_axis]  # type: ignore[index]
-            y3 = points[..., y3_axis] - self.reference_point[y3_axis]  # type: ignore[index]
+            y2 = points[..., y2_axis] - self.reference_point[y2_axis]
+            y3 = points[..., y3_axis] - self.reference_point[y3_axis]
             rows = [
                 [one, zero, y3, -y2],
                 [zero, zero, zero, zero],

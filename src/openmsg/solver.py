@@ -4,7 +4,7 @@ The constrained MSG saddle-point system is solved with the TensorMesh /
 ``torch-sla`` differentiable sparse solver (canonical ``SparseMatrix.solve``)
 or, optionally, a dense ``torch.linalg.solve``. Both paths support
 ``torch.autograd`` so gradients flow from the homogenized stiffness back to the
-assembled matrices (and hence to material and geometry parameters).
+assembled matrices and material stiffness tensors.
 
 MSG sign convention (kept fixed):
 
@@ -24,15 +24,13 @@ def _torch():
 
 
 def _as_dense(matrix, torch, *, dtype, device):
-    """Return a dense ``[n, n]`` tensor for E given numpy / torch / SparseMatrix."""
+    """Return a dense ``[n, n]`` tensor for E given torch / SparseMatrix."""
 
     if isinstance(matrix, torch.Tensor):
         return matrix.to(dtype=dtype, device=device)
     if hasattr(matrix, "to_dense"):  # torch_sla SparseTensor / SparseMatrix
         return matrix.to_dense().to(dtype=dtype, device=device)
-    import numpy as np
-
-    return torch.as_tensor(np.asarray(matrix, dtype=float), dtype=dtype, device=device)
+    raise TypeError("E must be a torch.Tensor or TensorMesh sparse matrix")
 
 
 def _as_sparse(matrix, torch, *, dtype, device):
@@ -46,19 +44,14 @@ def _as_sparse(matrix, torch, *, dtype, device):
         return SparseMatrix.from_dense(matrix.to(dtype=dtype, device=device))
     if hasattr(matrix, "to_dense"):  # generic SparseTensor
         return SparseMatrix.from_dense(matrix.to_dense().to(dtype=dtype, device=device))
-    import numpy as np
 
-    return SparseMatrix.from_dense(
-        torch.as_tensor(np.asarray(matrix, dtype=float), dtype=dtype, device=device)
-    )
+    raise TypeError("E must be a torch.Tensor or TensorMesh sparse matrix")
 
 
 def _as_2d(value, torch, *, dtype, device):
     if isinstance(value, torch.Tensor):
         return value.to(dtype=dtype, device=device)
-    import numpy as np
-
-    return torch.as_tensor(np.asarray(value, dtype=float), dtype=dtype, device=device)
+    raise TypeError("matrix inputs must be torch.Tensor objects")
 
 
 def _constraint_tensor(G, torch, *, dtype, device, n_dof):

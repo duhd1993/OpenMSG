@@ -1,10 +1,10 @@
 """TensorMesh-backed, autograd-friendly MSG finite element assembly.
 
 The assembly is fully tensorized in PyTorch and differentiable with respect to
-both the material stiffness tensors and the node coordinates (geometry). It uses
-TensorMesh element shape functions / quadrature for the reference machinery and
-returns a ``torch_sla``-backed sparse stiffness matrix that plugs directly into
-the differentiable TensorMesh linear solver.
+the material stiffness tensors. SG geometry is treated as fixed mesh input:
+TensorMesh supplies element shape functions / quadrature for the reference
+machinery, and the returned sparse stiffness matrix plugs directly into the
+differentiable TensorMesh linear solver.
 """
 
 from __future__ import annotations
@@ -14,8 +14,8 @@ from typing import Mapping
 
 import numpy as np
 
-from openmsg.macro import MacroModel, macro_model_from_kind
-from openmsg.mesh import HexMesh, OPENMSG_TO_MESHIO_ELEMENT
+from openmsg.macro import MacroModel
+from openmsg.mesh import OPENMSG_TO_MESHIO_ELEMENT, SolidMesh
 
 ASSEMBLY_KERNEL = "tensormesh_autograd"
 
@@ -25,8 +25,8 @@ class MSGSystem:
     """Differentiable assembled MSG system (PyTorch tensors).
 
     ``E`` is a ``tensormesh.sparse.SparseMatrix`` (a ``torch_sla.SparseTensor``
-    subclass); every field carries autograd history back to the material
-    stiffness tensors and the node-coordinate tensor used during assembly.
+    subclass); material-dependent fields carry autograd history back to the
+    material stiffness tensors used during assembly.
     """
 
     E: object
@@ -34,20 +34,7 @@ class MSGSystem:
     D0: object
     volume: object
     node_weights: object
-    nodes: object
     metadata: dict[str, object] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class AssemblyResult:
-    """NumPy view of an assembled MSG system (for reporting / inspection)."""
-
-    E: np.ndarray
-    H: np.ndarray
-    D0: np.ndarray
-    volume: float
-    node_weights: np.ndarray
-    E_sparse: object
 
 
 @dataclass(frozen=True)
@@ -55,18 +42,17 @@ class TensorMeshData:
     """Converted TensorMesh mesh plus material-index metadata."""
 
     mesh: object
-    material_index: np.ndarray
+    material_index: tuple[int, ...]
     material_names: tuple[str, ...]
 
 
 @dataclass(frozen=True)
 class ElementQuadrature:
-    """Differentiable TensorMesh quadrature for one element block, embedded in 3D.
+    """TensorMesh quadrature for one element block, embedded in 3D.
 
     This is the single TensorMesh-backed quadrature primitive shared by the
     assembly, local-field recovery, and rotation-constraint construction; it
-    replaces the retired hand-written NumPy quadrature. Every tensor carries
-    autograd history back to the node coordinates when those require grad.
+    replaces the retired hand-written NumPy quadrature.
 
     ``conn`` stores global node indices (TensorMesh permutes only the local
     node order within an element, so the global DOF numbering ``3 * node + comp``
@@ -83,11 +69,10 @@ class ElementQuadrature:
 
 
 def assemble_msg_system(
-    mesh: HexMesh,
+    mesh: SolidMesh,
     material_stiffness: Mapping[str, object],
     *,
     macro_model: MacroModel,
-    nodes: object | None = None,
     dtype: object | None = None,
     device: object | None = None,
 ) -> MSGSystem:
@@ -96,27 +81,24 @@ def assemble_msg_system(
     Parameters
     ----------
     mesh:
-        OpenMSG structure-genome mesh (topology and reference geometry).
+        OpenMSG structure-genome mesh (topology and fixed reference geometry).
+        Geometry is converted to torch tensors for quadrature and assembly, but
+        it is not treated as an optimization variable.
     material_stiffness:
-        Mapping from material id to a 6x6 stiffness; values may be NumPy arrays
-        or ``torch.Tensor`` objects. Pass tensors with ``requires_grad=True`` to
-        differentiate the homogenized response with respect to the material.
+        Mapping from material id to a 6x6 ``torch.Tensor`` stiffness. Pass
+        tensors with ``requires_grad=True`` to differentiate the homogenized
+        response with respect to the material.
     macro_model:
         Macroscopic model providing the local Voigt strain modes.
-    nodes:
-        Optional ``[n_nodes, 3]`` coordinate tensor. Pass a tensor with
-        ``requires_grad=True`` to differentiate with respect to geometry. When
-        ``None``, the mesh's reference coordinates are used (no grad).
     """
 
     import torch
     from tensormesh.sparse import SparseMatrix
 
-    nodes_t, tm_data, blocks = tensormesh_quadrature(
-        mesh, nodes=nodes, dtype=dtype, device=device
-    )
-    device = nodes_t.device
-    dtype = nodes_t.dtype
+    tm_data, blocks = tensormesh_quadrature(mesh, dtype=dtype, device=device)
+    sample = blocks[0].jxw
+    device = sample.device
+    dtype = sample.dtype
 
     C_element = _element_stiffness_stack(
         mesh, material_stiffness, tm_data, torch, dtype=dtype, device=device
@@ -147,7 +129,7 @@ def assemble_msg_system(
         CB = torch.einsum("eij,eqjk->eqik", C_e, B)  # C @ B
         E_local = torch.einsum("eqmi,eqmj,eq->eij", B, CB, jxw)  # [n_e, n_local, n_local]
 
-        B_macro = macro_model.strain_modes_batch(block.points, torch)  # [n_e, n_q, 6, n_macro]
+        B_macro = macro_model.strain_modes(block.points)  # [n_e, n_q, 6, n_macro]
         CBm = torch.einsum("eij,eqjk->eqik", C_e, B_macro)
         H_local = torch.einsum("eqmi,eqmk,eq->eik", B, CBm, jxw)  # [n_e, n_local, n_macro]
         D0 = D0 + torch.einsum("eqmi,eqmk,eq->ik", B_macro, CBm, jxw)
@@ -179,45 +161,11 @@ def assemble_msg_system(
         D0=D0,
         volume=volume,
         node_weights=node_weights,
-        nodes=nodes_t,
         metadata=metadata,
     )
 
 
-def assemble_msg(
-    mesh: HexMesh,
-    material_stiffness: dict[str, np.ndarray],
-    *,
-    macro_model: MacroModel,
-) -> tuple[AssemblyResult, dict[str, object]]:
-    """Assemble MSG matrices and return a NumPy view (detached from autograd)."""
-
-    system = assemble_msg_system(mesh, material_stiffness, macro_model=macro_model)
-    result = AssemblyResult(
-        E=system.E.to_dense().detach().cpu().numpy(),
-        H=system.H.detach().cpu().numpy(),
-        D0=system.D0.detach().cpu().numpy(),
-        volume=float(system.volume.detach().cpu()),
-        node_weights=system.node_weights.detach().cpu().numpy(),
-        E_sparse=system.E,
-    )
-    return result, system.metadata
-
-
-def assemble_3d_cauchy(
-    mesh: HexMesh,
-    material_stiffness: dict[str, np.ndarray],
-) -> tuple[AssemblyResult, dict[str, object]]:
-    """Assemble 3D Cauchy MSG matrices (NumPy view)."""
-
-    return assemble_msg(
-        mesh,
-        material_stiffness,
-        macro_model=macro_model_from_kind("cauchy_3d", mesh=mesh),
-    )
-
-
-def to_tensormesh_mesh(mesh: HexMesh) -> TensorMeshData:
+def to_tensormesh_mesh(mesh: SolidMesh) -> TensorMeshData:
     """Convert an OpenMSG SG mesh to a TensorMesh mesh."""
 
     import meshio
@@ -225,12 +173,13 @@ def to_tensormesh_mesh(mesh: HexMesh) -> TensorMeshData:
 
     material_names = tuple(sorted(set(mesh.material_ids)))
     material_lookup = {name: idx for idx, name in enumerate(material_names)}
-    material_index = np.asarray([material_lookup[name] for name in mesh.material_ids], dtype=np.int64)
+    material_index = tuple(material_lookup[name] for name in mesh.material_ids)
+    material_index_array = np.asarray(material_index, dtype=np.int64)
     points = mesh.nodes if mesh.sg_dimension == 3 else mesh.nodes[:, mesh.active_axes]
     meshio_mesh = meshio.Mesh(
         points=points,
         cells=[(OPENMSG_TO_MESHIO_ELEMENT[mesh.element_type], mesh.elements)],
-        cell_data={"material_index": [material_index]},
+        cell_data={"material_index": [material_index_array]},
     )
     return TensorMeshData(
         mesh=tensormesh.Mesh(meshio_mesh, reorder=True),
@@ -240,22 +189,19 @@ def to_tensormesh_mesh(mesh: HexMesh) -> TensorMeshData:
 
 
 def tensormesh_quadrature(
-    mesh: HexMesh,
+    mesh: SolidMesh,
     *,
-    nodes: object | None = None,
     dtype: object | None = None,
     device: object | None = None,
-) -> tuple[object, TensorMeshData, list[ElementQuadrature]]:
-    """Differentiable TensorMesh element quadrature embedded in 3D space.
+) -> tuple[TensorMeshData, list[ElementQuadrature]]:
+    """TensorMesh element quadrature embedded in 3D space.
 
     This is the shared TensorMesh primitive used by assembly, local-field
     recovery, and rotation-constraint construction. It returns
-    ``(nodes_tensor, tm_data, blocks)`` where ``blocks`` holds one
-    :class:`ElementQuadrature` per element type with shape values, 3D-embedded
-    physical shape-function gradients, integration weights, and physical
-    quadrature-point coordinates as ``torch`` tensors. Pass ``nodes`` with
-    ``requires_grad=True`` to differentiate the quadrature data with respect to
-    geometry.
+    ``(tm_data, blocks)`` where ``blocks`` holds one :class:`ElementQuadrature`
+    per element type with shape values, 3D-embedded physical shape-function
+    gradients, integration weights, and physical quadrature-point coordinates
+    as ``torch`` tensors.
     """
 
     import torch
@@ -263,12 +209,12 @@ def tensormesh_quadrature(
     if dtype is None:
         dtype = torch.float64
 
-    nodes_t = _as_node_tensor(mesh, nodes, torch, dtype=dtype, device=device)
-    device = nodes_t.device
-    dtype = nodes_t.dtype
+    mesh_nodes = _mesh_node_tensor(mesh, torch, dtype=dtype, device=device)
+    device = mesh_nodes.device
+    dtype = mesh_nodes.dtype
 
     active_axes = tuple(mesh.active_axes)
-    points = nodes_t if mesh.sg_dimension == 3 else nodes_t[:, active_axes]
+    points = mesh_nodes if mesh.sg_dimension == 3 else mesh_nodes[:, active_axes]
 
     tm_data = to_tensormesh_mesh(mesh)
     provider = _transformation_provider(tm_data.mesh)
@@ -285,7 +231,7 @@ def tensormesh_quadrature(
             quadrature_start=0, quadrature_batch=n_quad
         )  # [n_e, n_quad, n_basis, dim], [n_e, n_quad]
         dN_dx = _embed_grad_3d(shape_grad, active_axes, torch)  # [n_e, n_quad, n_basis, 3]
-        x_q = torch.einsum("qb,ebd->eqd", shape_val, nodes_t[conn])  # [n_e, n_quad, 3]
+        x_q = torch.einsum("qb,ebd->eqd", shape_val, mesh_nodes[conn])  # [n_e, n_quad, 3]
         blocks.append(
             ElementQuadrature(
                 cell_type=cell_type,
@@ -296,15 +242,11 @@ def tensormesh_quadrature(
                 points=x_q,
             )
         )
-    return nodes_t, tm_data, blocks
+    return tm_data, blocks
 
 
-def _as_node_tensor(mesh, nodes, torch, *, dtype, device):
-    if nodes is None:
-        return torch.as_tensor(np.asarray(mesh.nodes, dtype=float), dtype=dtype, device=device)
-    if isinstance(nodes, torch.Tensor):
-        return nodes.to(dtype=dtype, device=device) if device is not None else nodes.to(dtype=dtype)
-    return torch.as_tensor(np.asarray(nodes, dtype=float), dtype=dtype, device=device)
+def _mesh_node_tensor(mesh, torch, *, dtype, device):
+    return torch.as_tensor(mesh.nodes, dtype=dtype, device=device)
 
 
 def _element_stiffness_stack(mesh, material_stiffness, tm_data, torch, *, dtype, device):
@@ -313,10 +255,14 @@ def _element_stiffness_stack(mesh, material_stiffness, tm_data, torch, *, dtype,
     columns = []
     for name in tm_data.material_names:
         value = material_stiffness[name]
-        if isinstance(value, torch.Tensor):
-            columns.append(value.to(dtype=dtype, device=device))
-        else:
-            columns.append(torch.as_tensor(np.asarray(value, dtype=float), dtype=dtype, device=device))
+        if not isinstance(value, torch.Tensor):
+            raise TypeError(
+                f"material_stiffness[{name!r}] must be a torch.Tensor; "
+                "use openmsg.materials helpers or torch.as_tensor before assembly"
+            )
+        if value.shape != (6, 6):
+            raise ValueError(f"material_stiffness[{name!r}] must have shape (6, 6)")
+        columns.append(value.to(dtype=dtype, device=device))
     C_stack = torch.stack(columns, dim=0)  # [n_materials, 6, 6]
     index = torch.as_tensor(tm_data.material_index, dtype=torch.long, device=device)
     return C_stack[index]  # [n_elements, 6, 6]
