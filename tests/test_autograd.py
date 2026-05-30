@@ -11,8 +11,9 @@ import unittest
 
 import torch
 
-from openmsg.homogenize import effective_stiffness, homogenize_msg
+from openmsg.homogenize import effective_stiffness
 from openmsg.materials import isotropic_stiffness
+from openmsg.mesh import SolidMesh
 from tests.mesh_builders import structured_hex_mesh
 
 
@@ -27,16 +28,68 @@ def _hetero_bar():
     )
 
 
+def _line2_sg_mesh() -> SolidMesh:
+    return SolidMesh(
+        nodes=[[0.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
+        elements=[[0, 1]],
+        material_ids=("m",),
+        element_type="line2",
+    )
+
+
+def _quad4_sg_mesh() -> SolidMesh:
+    return SolidMesh(
+        nodes=[
+            [0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 1.0, 1.0],
+            [0.0, 0.0, 1.0],
+        ],
+        elements=[[0, 1, 2, 3]],
+        material_ids=("m",),
+        element_type="quad4",
+    )
+
+
+def _line_thickness_mesh() -> SolidMesh:
+    return SolidMesh(
+        nodes=[
+            [0.0, 0.0, -0.5],
+            [0.0, 0.0, -0.25],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.25],
+            [0.0, 0.0, 0.5],
+        ],
+        elements=[[0, 1], [1, 2], [2, 3], [3, 4]],
+        material_ids=("m",) * 4,
+        element_type="line2",
+    )
+
+
+def _quad4_cross_section_mesh() -> SolidMesh:
+    return SolidMesh(
+        nodes=[
+            [0.0, -0.5, -0.5],
+            [0.0, 0.5, -0.5],
+            [0.0, 0.5, 0.5],
+            [0.0, -0.5, 0.5],
+        ],
+        elements=[[0, 1, 2, 3]],
+        material_ids=("m",),
+        element_type="quad4",
+    )
+
+
 class AutogradTests(unittest.TestCase):
-    def test_homogenize_matches_effective_stiffness(self) -> None:
+    def test_default_macro_matches_explicit_cauchy(self) -> None:
         mesh = _hetero_bar()
         materials = {"matrix": isotropic_stiffness(10.0, 0.3), "fiber": isotropic_stiffness(70.0, 0.2)}
 
         direct_result = effective_stiffness(mesh=mesh, material_stiffness=materials, macro_model="cauchy_3d")
-        wrapped_result = homogenize_msg(mesh=mesh, material_stiffness=materials)
+        default_result = effective_stiffness(mesh=mesh, material_stiffness=materials)
 
-        self.assertIsInstance(wrapped_result.Dbar, torch.Tensor)
-        torch.testing.assert_close(direct_result.Dbar, wrapped_result.Dbar, rtol=1e-10, atol=1e-10)
+        self.assertIsInstance(default_result.Dbar, torch.Tensor)
+        torch.testing.assert_close(direct_result.Dbar, default_result.Dbar, rtol=1e-10, atol=1e-10)
 
     def test_material_gradient_scale_is_analytic_for_homogeneous_cube(self) -> None:
         # For a homogeneous cell Dbar == C, so d(Dbar)/d(scale) == C exactly.
@@ -101,6 +154,76 @@ class AutogradTests(unittest.TestCase):
 
         self.assertIsNotNone(young.grad)
         self.assertGreater(float(young.grad.abs()), 0.0)
+
+    def test_reduced_sg_material_gradient_scale_is_analytic(self) -> None:
+        C0 = isotropic_stiffness(100.0, 0.25)
+        cases = [("line2", _line2_sg_mesh()), ("quad4", _quad4_sg_mesh())]
+
+        for name, mesh in cases:
+            with self.subTest(element_type=name):
+                scale = torch.tensor(1.0, dtype=torch.float64, requires_grad=True)
+                result = effective_stiffness(mesh=mesh, material_stiffness={"m": scale * C0})
+                objective = result.Dbar[0, 0] + 0.37 * result.Dbar[3, 3]
+
+                (grad,) = torch.autograd.grad(objective, scale)
+
+                expected = C0[0, 0] + 0.37 * C0[3, 3]
+                torch.testing.assert_close(grad, expected, rtol=1e-9, atol=1e-9)
+
+    def test_structural_material_gradient_scale_is_analytic(self) -> None:
+        C0 = isotropic_stiffness(100.0, 0.25)
+        cases = [
+            ("kirchhoff_love_plate", _line_thickness_mesh(), (0, 0), (3, 3)),
+            ("euler_bernoulli_beam", _quad4_cross_section_mesh(), (0, 0), (2, 2)),
+        ]
+
+        for macro_model, mesh, first, second in cases:
+            with self.subTest(macro_model=macro_model):
+                scale = torch.tensor(1.0, dtype=torch.float64, requires_grad=True)
+                result = effective_stiffness(
+                    mesh=mesh,
+                    material_stiffness={"m": scale * C0},
+                    macro_model=macro_model,
+                )
+                objective = result.Dbar[first] + 0.19 * result.Dbar[second]
+
+                (grad,) = torch.autograd.grad(objective, scale)
+
+                torch.testing.assert_close(grad, objective.detach(), rtol=1e-8, atol=1e-8)
+
+    def test_dense_and_sparse_material_gradients_match(self) -> None:
+        mesh = _hetero_bar()
+        weight = torch.tensor(
+            [
+                [1.0, 0.2, 0.0, 0.0, 0.0, 0.0],
+                [0.2, 0.5, 0.0, 0.0, 0.0, 0.0],
+                [0.0, 0.0, 0.3, 0.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0, 0.1, 0.0, 0.0],
+                [0.0, 0.0, 0.0, 0.0, 0.2, 0.0],
+                [0.0, 0.0, 0.0, 0.0, 0.0, 0.4],
+            ],
+            dtype=torch.float64,
+        )
+
+        def solve_and_grad(linear_solver: str) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+            C_matrix = isotropic_stiffness(10.0, 0.3).requires_grad_(True)
+            C_fiber = isotropic_stiffness(70.0, 0.2).requires_grad_(True)
+            result = effective_stiffness(
+                mesh=mesh,
+                material_stiffness={"matrix": C_matrix, "fiber": C_fiber},
+                macro_model="cauchy_3d",
+                linear_solver=linear_solver,
+            )
+            objective = (result.Dbar * weight).sum()
+            grad_matrix, grad_fiber = torch.autograd.grad(objective, (C_matrix, C_fiber))
+            return result.Dbar.detach(), grad_matrix, grad_fiber
+
+        sparse_dbar, sparse_matrix_grad, sparse_fiber_grad = solve_and_grad("sparse")
+        dense_dbar, dense_matrix_grad, dense_fiber_grad = solve_and_grad("dense")
+
+        torch.testing.assert_close(sparse_dbar, dense_dbar, rtol=1e-10, atol=1e-10)
+        torch.testing.assert_close(sparse_matrix_grad, dense_matrix_grad, rtol=1e-8, atol=1e-8)
+        torch.testing.assert_close(sparse_fiber_grad, dense_fiber_grad, rtol=1e-8, atol=1e-8)
 
 
 if __name__ == "__main__":

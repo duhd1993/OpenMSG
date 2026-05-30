@@ -5,7 +5,7 @@ import unittest
 import numpy as np
 import torch
 
-from openmsg.homogenize import homogenize_msg
+from openmsg.homogenize import effective_stiffness
 from openmsg.materials import isotropic_stiffness, orthotropic_stiffness
 from openmsg.mesh import SolidMesh
 from tests.mesh_builders import structured_hex_mesh
@@ -16,7 +16,7 @@ class TensorMeshAssemblyTests(unittest.TestCase):
         mesh = structured_hex_mesh(bounds=((0, 1), (0, 1), (0, 1)), cells=(1, 1, 1), default_material="m")
         C = isotropic_stiffness(100.0, 0.25)
 
-        result = homogenize_msg(mesh=mesh, material_stiffness={"m": C})
+        result = effective_stiffness(mesh=mesh, material_stiffness={"m": C})
 
         self.assertEqual(result.metadata["assembly_kernel"], "tensormesh_autograd")
         self.assertEqual(result.metadata["linear_solver"], "sparse")
@@ -47,8 +47,8 @@ class TensorMeshAssemblyTests(unittest.TestCase):
             ),
         }
 
-        sparse_result = homogenize_msg(mesh=mesh, material_stiffness=materials)
-        dense_result = homogenize_msg(
+        sparse_result = effective_stiffness(mesh=mesh, material_stiffness=materials)
+        dense_result = effective_stiffness(
             mesh=mesh,
             material_stiffness=materials,
             linear_solver="dense",
@@ -62,8 +62,8 @@ class TensorMeshAssemblyTests(unittest.TestCase):
         mesh = structured_hex_mesh(bounds=((0, 1), (0, 1), (0, 1)), cells=(1, 1, 1), default_material="m")
         C = isotropic_stiffness(100.0, 0.25)
 
-        sparse_result = homogenize_msg(mesh=mesh, material_stiffness={"m": C})
-        dense_result = homogenize_msg(
+        sparse_result = effective_stiffness(mesh=mesh, material_stiffness={"m": C})
+        dense_result = effective_stiffness(
             mesh=mesh,
             material_stiffness={"m": C},
             linear_solver="dense",
@@ -100,6 +100,6 @@ class TensorMeshAssemblyTests(unittest.TestCase):
         mesh = SolidMesh(nodes=nodes, elements=elements, material_ids=("m",) * 6, element_type="tet4")
         C = isotropic_stiffness(100.0, 0.25)
 
-        result = homogenize_msg(mesh=mesh, material_stiffness={"m": C})
+        result = effective_stiffness(mesh=mesh, material_stiffness={"m": C})
 
         np.testing.assert_allclose(result.Dbar, C, rtol=1e-10, atol=1e-10)

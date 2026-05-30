@@ -17,7 +17,7 @@ import unittest
 
 import numpy as np
 
-from openmsg.homogenize import homogenize_msg
+from openmsg.homogenize import effective_stiffness
 from openmsg.materials import engineering_constants_from_stiffness, isotropic_stiffness
 from openmsg.mesh import SolidMesh
 
@@ -190,7 +190,7 @@ class GmshSquarePackTests(unittest.TestCase):
             fiber_volume_fraction=cls.TARGET_VF,
             mesh_size=0.08,
         )
-        cls.result = homogenize_msg(
+        cls.result = effective_stiffness(
             mesh=cls.mesh,
             material_stiffness={
                 "fiber": isotropic_stiffness(cls.FIBER_E, cls.FIBER_NU),
@@ -315,7 +315,7 @@ class GmshSquarePack3DConsistencyTests(unittest.TestCase):
             fiber_volume_fraction=cls.TARGET_VF,
             mesh_size=cls.MESH_SIZE,
         )
-        cls.Dbar_2d = homogenize_msg(
+        cls.Dbar_2d = effective_stiffness(
             mesh=cls.mesh_2d,
             material_stiffness=material_stiffness,
             macro_model="cauchy_3d",
@@ -324,7 +324,7 @@ class GmshSquarePack3DConsistencyTests(unittest.TestCase):
 
         # 3D Tet4 SG — exact Python-level extrusion of the same 2D mesh
         cls.mesh_3d = _extrude_tri3_to_tet4(cls.mesh_2d, lz=1.0)
-        cls.Dbar_3d = homogenize_msg(
+        cls.Dbar_3d = effective_stiffness(
             mesh=cls.mesh_3d,
             material_stiffness=material_stiffness,
             macro_model="cauchy_3d",

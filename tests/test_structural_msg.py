@@ -7,7 +7,7 @@ import numpy as np
 
 from openmsg.config import run_config
 from openmsg.dehomogenize import recover_gauss_fields
-from openmsg.homogenize import homogenize_msg
+from openmsg.homogenize import effective_stiffness
 from openmsg.materials import isotropic_stiffness
 from openmsg.mesh import SolidMesh
 from tests.mesh_builders import structured_hex_mesh
@@ -55,7 +55,7 @@ class StructuralMSGTests(unittest.TestCase):
         )
         expected = np.block([[Q, np.zeros((3, 3))], [np.zeros((3, 3)), Q / 12.0]])
 
-        result = homogenize_msg(
+        result = effective_stiffness(
             mesh=mesh,
             material_stiffness={"m": C},
             macro_model="kirchhoff_love_plate",
@@ -72,7 +72,7 @@ class StructuralMSGTests(unittest.TestCase):
         young = 100.0
         C = isotropic_stiffness(young, 0.25)
 
-        result = homogenize_msg(
+        result = effective_stiffness(
             mesh=mesh,
             material_stiffness={"m": C},
             macro_model="euler_bernoulli_beam",
@@ -94,12 +94,12 @@ class StructuralMSGTests(unittest.TestCase):
         )
         C = isotropic_stiffness(100.0, 0.25)
 
-        plate_result = homogenize_msg(
+        plate_result = effective_stiffness(
             mesh=mesh,
             material_stiffness={"m": C},
             macro_model="kirchhoff_love_plate",
         )
-        beam_result = homogenize_msg(
+        beam_result = effective_stiffness(
             mesh=mesh,
             material_stiffness={"m": C},
             macro_model="euler_bernoulli_beam",
@@ -115,7 +115,7 @@ class StructuralMSGTests(unittest.TestCase):
     def test_plate_msg_dehomogenization_accepts_generalized_strain(self) -> None:
         mesh = line_thickness_mesh(n_elements=4)
         C = isotropic_stiffness(100.0, 0.25)
-        result = homogenize_msg(
+        result = effective_stiffness(
             mesh=mesh,
             material_stiffness={"m": C},
             macro_model="kirchhoff_love_plate",
@@ -186,12 +186,12 @@ class StructuralMSGTests(unittest.TestCase):
 
         for macro_model, mesh in cases:
             with self.subTest(model=macro_model):
-                sparse_result = homogenize_msg(
+                sparse_result = effective_stiffness(
                     mesh=mesh,
                     material_stiffness={"m": C},
                     macro_model=macro_model,
                 )
-                dense_result = homogenize_msg(
+                dense_result = effective_stiffness(
                     mesh=mesh,
                     material_stiffness={"m": C},
                     macro_model=macro_model,

@@ -12,7 +12,7 @@ import math
 
 import numpy as np
 
-from openmsg import SolidMesh, homogenize_msg, isotropic_stiffness
+from openmsg import SolidMesh, effective_stiffness, isotropic_stiffness
 
 
 IN_PLANE = np.array([0, 1, 5], dtype=int)
@@ -145,7 +145,7 @@ def run_single_layer_comparison(
 
     stiffness = isotropic_stiffness(young, nu)
     mesh = line_thickness_mesh(thickness=thickness, n_elements=n_elements)
-    msg = homogenize_msg(mesh=mesh, material_stiffness={"m": stiffness}, macro_model="kirchhoff_love_plate")
+    msg = effective_stiffness(mesh=mesh, material_stiffness={"m": stiffness}, macro_model="kirchhoff_love_plate")
     reference = laminate_abd([Ply(stiffness=stiffness, thickness=thickness)])
     msg_abd = msg.Dbar.detach().cpu().numpy()
     diff = msg_abd - reference.ABD

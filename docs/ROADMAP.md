@@ -24,10 +24,10 @@
   are treated as fixed mesh geometry, but geometry-derived quadrature data,
   constraints, and normalization factors stay in torch tensors in the core
   solve.
-- PyTorch-backed `MSGResult` returned directly by both `homogenize_msg` and
-  `effective_stiffness`; JSON conversion happens at `to_dict`/CLI boundaries.
-  The old `MSGTorchResult`, `AssemblyResult`, and NumPy assembly wrappers have
-  been removed.
+- PyTorch-backed `MSGResult` returned directly by `effective_stiffness`; JSON
+  conversion happens at `to_dict`/CLI boundaries. The old `homogenize_msg`,
+  `MSGTorchResult`, `AssemblyResult`, and NumPy assembly wrappers have been
+  removed.
 - SG-based Kirchhoff-Love plate `ABD` output.
 - SG-based Euler-Bernoulli beam 4x4 stiffness output.
 - Local Gauss-point strain and stress recovery.
@@ -36,7 +36,9 @@
   reference.
 - Unit tests for materials, algebra, constraints, assembly, homogeneous recovery,
   TensorMesh assembly validation, dehomogenization, config loading, end-to-end
-  material autograd, and the square-pack input generator.
+  material autograd, structural-model material gradients, 1D/2D SG material
+  gradients, dense-vs-sparse material-gradient equivalence, and the square-pack
+  input generator.
 
 ## Next Useful Steps
 
@@ -50,6 +52,3 @@
 6. Support multiple element types within a single mesh — per-type connectivity,
    material indexing, and DOF scatter in `assemble_msg_system` (a single element
    type per mesh is currently assumed).
-7. Expand autograd test coverage: Kirchhoff-Love plate and Euler-Bernoulli beam
-   material gradients, 2D/1D SG material autograd, and dense-vs-sparse material
-   gradient equivalence.

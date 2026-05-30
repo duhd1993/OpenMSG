@@ -25,10 +25,10 @@ The current implementation scope is intentionally small:
   in torch tensors in the core solve. The constrained saddle-point system is
   solved with the differentiable `torch-sla` sparse solver
   (`SparseMatrix.solve(method="lu")`).
-  `homogenize_msg` and `effective_stiffness` return the same PyTorch-backed
-  `MSGResult`; tensor-to-list conversion happens only at the `to_dict`/CLI
-  serialization boundary. The former hand-written NumPy assembly/solve path and
-  NumPy-facing result wrappers have been removed.
+  `effective_stiffness` returns a PyTorch-backed `MSGResult`; tensor-to-list
+  conversion happens only at the `to_dict`/CLI serialization boundary. The
+  former hand-written NumPy assembly/solve path and NumPy-facing result wrappers
+  have been removed.
 - Explicit input meshes are preferred. Mesh generation belongs in examples,
   tests, or external preprocessing scripts, not in the solver core.
 - Analytical classical laminate ABD helpers are examples/reference code only.

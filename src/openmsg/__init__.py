@@ -5,7 +5,6 @@ from openmsg.config import load_config, run_config
 from openmsg.homogenize import (
     MSGResult,
     effective_stiffness,
-    homogenize_msg,
 )
 from openmsg.macro import MacroModel, macro_model_from_analysis, macro_model_from_kind
 from openmsg.materials import (
@@ -29,7 +28,6 @@ __all__ = [
     "cubic_stiffness",
     "effective_stiffness",
     "engineering_constants_from_stiffness",
-    "homogenize_msg",
     "isotropic_stiffness",
     "load_config",
     "macro_model_from_analysis",

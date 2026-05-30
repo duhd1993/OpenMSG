@@ -1,10 +1,9 @@
 """High-level MSG homogenization API.
 
-``effective_stiffness`` and ``homogenize_msg`` return the same PyTorch-backed
-:class:`MSGResult`. ``Dbar`` carries autograd history back to the material
-stiffness tensors, so gradients of scalar objectives can be obtained with
-``torch.autograd``. JSON-friendly conversion happens only in
-:meth:`MSGResult.to_dict`.
+``effective_stiffness`` returns a PyTorch-backed :class:`MSGResult`. ``Dbar``
+carries autograd history back to the material stiffness tensors, so gradients
+of scalar objectives can be obtained with ``torch.autograd``. JSON-friendly
+conversion happens only in :meth:`MSGResult.to_dict`.
 """
 
 from __future__ import annotations
@@ -159,33 +158,6 @@ def effective_stiffness(
         lagrange=lagrange,
         node_weights=system.node_weights,
         metadata=metadata,
-    )
-
-
-def homogenize_msg(
-    *,
-    mesh: SolidMesh,
-    material_stiffness: dict[str, object],
-    macro_model: str | MacroModel = "cauchy_3d",
-    constraints: list[str | dict[str, object]] | tuple[str | dict[str, object], ...] | str | None = "auto",
-    linear_solver: str = "auto",
-    dtype: object | None = None,
-    device: object | None = None,
-) -> MSGResult:
-    """Run MSG homogenization and return a PyTorch-backed :class:`MSGResult`.
-
-    ``material_stiffness`` values must be 6x6 torch tensors; config-loaded
-    materials are converted before this wrapper is called.
-    """
-
-    return effective_stiffness(
-        mesh=mesh,
-        material_stiffness=material_stiffness,
-        macro_model=macro_model,
-        constraints=constraints,
-        linear_solver=linear_solver,
-        dtype=dtype,
-        device=device,
     )
 
 

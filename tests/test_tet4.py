@@ -7,7 +7,7 @@ import torch
 
 from openmsg.assembly import assemble_msg_system
 from openmsg.dehomogenize import recover_gauss_fields
-from openmsg.homogenize import homogenize_msg
+from openmsg.homogenize import effective_stiffness
 from openmsg.macro import macro_model_from_kind
 from openmsg.materials import isotropic_stiffness
 from openmsg.mesh import SolidMesh, mesh_from_config
@@ -63,7 +63,7 @@ class Tet4Tests(unittest.TestCase):
         mesh = cube_tet_mesh()
         C = isotropic_stiffness(100.0, 0.25)
 
-        result = homogenize_msg(mesh=mesh, material_stiffness={"m": C})
+        result = effective_stiffness(mesh=mesh, material_stiffness={"m": C})
 
         np.testing.assert_allclose(result.Dbar, C, rtol=1e-10, atol=1e-10)
         self.assertEqual(result.metadata["n_elements"], 6)
@@ -71,7 +71,7 @@ class Tet4Tests(unittest.TestCase):
     def test_tet4_dehomogenization_uses_tensormesh_quadrature_points(self) -> None:
         mesh = cube_tet_mesh()
         C = isotropic_stiffness(100.0, 0.25)
-        result = homogenize_msg(mesh=mesh, material_stiffness={"m": C})
+        result = effective_stiffness(mesh=mesh, material_stiffness={"m": C})
         macro_strain = np.array([0.01, -0.02, 0.03, 0.004, -0.005, 0.006])
 
         fields = recover_gauss_fields(mesh=mesh, material_stiffness={"m": C}, V0=result.V0, macro_strain=macro_strain)

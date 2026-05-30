@@ -44,7 +44,7 @@ constraint system.
 ## Python API
 
 ```python
-from openmsg import SolidMesh, homogenize_msg, isotropic_stiffness
+from openmsg import SolidMesh, effective_stiffness, isotropic_stiffness
 
 mesh = SolidMesh(
     nodes=[
@@ -63,7 +63,7 @@ mesh = SolidMesh(
 )
 C = isotropic_stiffness(young=100.0, poisson=0.25)
 
-result = homogenize_msg(
+result = effective_stiffness(
     mesh=mesh,
     material_stiffness={"matrix": C},
     macro_model="cauchy_3d",
@@ -82,8 +82,8 @@ The assembly and constrained solve are fully tensorized in PyTorch and
 differentiable. `effective_stiffness` returns the homogenized stiffness `Dbar`
 as a `torch.Tensor` with autograd history back to the material stiffness tensors.
 Material helper functions such as `isotropic_stiffness` return torch tensors.
-Direct Python calls to `homogenize_msg` and `effective_stiffness` expect these
-torch material tensors; NumPy stiffness arrays are rejected by assembly.
+Direct Python calls to `effective_stiffness` expect these torch material tensors;
+NumPy stiffness arrays are rejected by assembly.
 Mesh node coordinates are treated as fixed SG geometry, but the assembled
 geometry, quadrature data, constraints, and normalization factors stay in torch
 tensors inside this path.
@@ -108,9 +108,8 @@ print(young.grad)             # gradient through the material stiffness formula
 ```
 
 The constrained saddle-point system is solved with the differentiable
-`torch-sla` sparse solver built into TensorMesh. `homogenize_msg` and
-`effective_stiffness` both return the same PyTorch-backed `MSGResult`; JSON
-serialization converts tensors only at the `to_dict`/CLI boundary.
+`torch-sla` sparse solver built into TensorMesh. JSON serialization converts
+tensors only at the `to_dict`/CLI boundary.
 
 ## Input Format
 

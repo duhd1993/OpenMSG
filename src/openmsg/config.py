@@ -9,7 +9,7 @@ from typing import Any
 import numpy as np
 
 from openmsg.dehomogenize import recover_gauss_fields
-from openmsg.homogenize import MSGResult, homogenize_msg
+from openmsg.homogenize import MSGResult, effective_stiffness
 from openmsg.macro import default_constraints_for_macro_model, macro_model_from_analysis
 from openmsg.materials import stiffness_from_config
 from openmsg.mesh import mesh_from_config
@@ -63,7 +63,7 @@ def run_config(config_or_path: dict[str, Any] | str | Path) -> MSGResult:
     macro_model = macro_model_from_analysis(analysis, mesh)
     constraints = analysis.get("constraints", default_constraints_for_macro_model(macro_model, mesh))
     linear_solver = str(analysis.get("linear_solver", "auto"))
-    result = homogenize_msg(
+    result = effective_stiffness(
         mesh=mesh,
         material_stiffness=materials,
         macro_model=macro_model,
