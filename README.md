@@ -16,6 +16,11 @@ current version implements a testable core:
 The implementation follows the sign and shape conventions in
 `docs/IMPLEMENTATION_CONTRACT.md`.
 
+Known geometric limitation: the structural plate and beam models assume flat
+or straight reference geometry. Initial curvature terms for shells, curved
+plates, or curved beams are not modeled; supporting them would require
+curvature-dependent `B_w` and `B_macro(y)` operators.
+
 ## Quick Start
 
 ```bash
