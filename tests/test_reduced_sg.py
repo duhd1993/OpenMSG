@@ -16,9 +16,7 @@ from openmsg.mesh import SolidMesh, mesh_from_config
 def line2_sg_mesh() -> SolidMesh:
     return SolidMesh(
         nodes=np.array([[0, 0, 0], [0, 0, 1]], dtype=float),
-        elements=np.array([[0, 1]], dtype=int),
-        material_ids=("m",),
-        element_type="line2",
+        elements=[{"type": "line2", "connectivity": [[0, 1]], "material": "m"}],
     )
 
 
@@ -33,9 +31,7 @@ def quad4_sg_mesh() -> SolidMesh:
             ],
             dtype=float,
         ),
-        elements=np.array([[0, 1, 2, 3]], dtype=int),
-        material_ids=("m",),
-        element_type="quad4",
+        elements=[{"type": "quad4", "connectivity": [[0, 1, 2, 3]], "material": "m"}],
     )
 
 
@@ -50,9 +46,13 @@ def tri3_sg_mesh() -> SolidMesh:
             ],
             dtype=float,
         ),
-        elements=np.array([[0, 1, 2], [0, 2, 3]], dtype=int),
-        material_ids=("m", "m"),
-        element_type="tri3",
+        elements=[
+            {
+                "type": "tri3",
+                "connectivity": [[0, 1, 2], [0, 2, 3]],
+                "material": "m",
+            }
+        ],
     )
 
 
@@ -75,7 +75,7 @@ class ReducedSGTests(unittest.TestCase):
         cases = [line2_sg_mesh(), quad4_sg_mesh(), tri3_sg_mesh()]
 
         for mesh in cases:
-            with self.subTest(element_type=mesh.element_type):
+            with self.subTest(element_types=mesh.element_types):
                 system = assemble_cauchy_system(mesh, C)
                 E = system.E.to_dense()
                 result = effective_stiffness(mesh=mesh, material_stiffness={"m": C})
@@ -127,7 +127,7 @@ class ReducedSGTests(unittest.TestCase):
         ]
 
         for mesh, expected_points in cases:
-            with self.subTest(element_type=mesh.element_type):
+            with self.subTest(element_types=mesh.element_types):
                 result = effective_stiffness(mesh=mesh, material_stiffness={"m": C})
                 fields = recover_gauss_fields(
                     mesh=mesh,
@@ -142,25 +142,25 @@ class ReducedSGTests(unittest.TestCase):
     def test_reduced_sg_config_active_axes(self) -> None:
         line_mesh = mesh_from_config(
             {
-                "type": "line2",
                 "active_axes": ["z"],
                 "nodes": [[0], [1]],
-                "elements": [{"nodes": [0, 1], "material": "m"}],
+                "elements": [{"type": "line2", "connectivity": [[0, 1]], "material": "m"}],
             }
         )
         quad_mesh = mesh_from_config(
             {
-                "type": "quad4",
                 "active_axes": ["y", "z"],
                 "nodes": [[0, 0], [1, 0], [1, 1], [0, 1]],
-                "elements": [{"nodes": [0, 1, 2, 3], "material": "m"}],
+                "elements": [
+                    {"type": "quad4", "connectivity": [[0, 1, 2, 3]], "material": "m"}
+                ],
             }
         )
 
-        self.assertEqual(line_mesh.element_type, "line2")
+        self.assertEqual(line_mesh.element_types, ("line2",))
         self.assertEqual(line_mesh.active_axes, (2,))
         self.assertEqual(line_mesh.nodes.shape, (2, 3))
-        self.assertEqual(quad_mesh.element_type, "quad4")
+        self.assertEqual(quad_mesh.element_types, ("quad4",))
         self.assertEqual(quad_mesh.active_axes, (1, 2))
         self.assertEqual(quad_mesh.nodes.shape, (4, 3))
 

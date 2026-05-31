@@ -97,7 +97,10 @@ class TensorMeshAssemblyTests(unittest.TestCase):
             ],
             dtype=int,
         )
-        mesh = SolidMesh(nodes=nodes, elements=elements, material_ids=("m",) * 6, element_type="tet4")
+        mesh = SolidMesh(
+            nodes=nodes,
+            elements=[{"type": "tet4", "connectivity": elements, "material": "m"}],
+        )
         C = isotropic_stiffness(100.0, 0.25)
 
         result = effective_stiffness(mesh=mesh, material_stiffness={"m": C})

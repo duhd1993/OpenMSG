@@ -5,7 +5,8 @@ current version implements a testable core:
 
 - linear elastic MSG homogenization to 3D Cauchy continuum,
   Kirchhoff-Love plate, and Euler-Bernoulli beam macroscopic models;
-- Hex8, Tet4, Quad4, Tri3, and Line2 Structure Genome finite elements;
+- Hex8, Tet4, Quad4, Tri3, and Line2 Structure Genome finite elements,
+  including mixed meshes that combine element types of the same SG dimension;
 - 1D/2D/3D SG meshes with the selected macroscopic model controlling the
   output stiffness shape;
 - mean-zero and periodic fluctuation constraints;
@@ -57,9 +58,13 @@ mesh = SolidMesh(
         [1, 1, 1],
         [0, 1, 1],
     ],
-    elements=[[0, 1, 2, 3, 4, 5, 6, 7]],
-    material_ids=("matrix",),
-    element_type="hex8",
+    elements=[
+        {
+            "type": "hex8",
+            "connectivity": [[0, 1, 2, 3, 4, 5, 6, 7]],
+            "material": "matrix",
+        }
+    ],
 )
 C = isotropic_stiffness(young=100.0, poisson=0.25)
 
@@ -115,10 +120,13 @@ tensors only at the `to_dict`/CLI boundary.
 
 See `docs/INPUT_FORMAT.md` and `examples/`.
 
-The main input path is an explicit SG mesh with nodes, element connectivity,
-and material names. Mesh generation is intentionally outside the solver core;
-example scripts may generate JSON inputs for testing. Reduced 1D/2D SG meshes
-use `active_axes` to state which physical axes remain nonuniform.
+The main input path is an explicit SG mesh with nodes and element blocks. Each
+block declares its element type, a connectivity matrix, and either one material
+name for the whole block or a per-element material list. A single explicit mesh
+may mix same-dimensional element types, for example Quad4 with Tri3 or Hex8
+with Tet4. Mesh generation is intentionally outside the solver core; example
+scripts may generate JSON inputs for testing. Reduced 1D/2D SG meshes use
+`active_axes` to state which physical axes remain nonuniform.
 
 Set `analysis.type` to choose the macroscopic model:
 
@@ -135,13 +143,15 @@ not a core analysis type. See `examples/plate_msg_vs_laminate_abd.py` for a
 ## Square-Pack Benchmark
 
 ```bash
-uv run python examples/square_pack_fiber.py --cells-xy 8 --vf 0.35
+uv run python examples/square_pack_fiber.py --mesh-size 0.08 --vf 0.35
 ```
 
 The script is a benchmark/input generator, not part of the public solver API.
-It writes no mesh by default; add `--write-input square_pack.json` to save the
-generated explicit Hex8 input. It reports apparent engineering constants and
-compares the longitudinal modulus with the Voigt rule of mixture.
+It uses gmsh to generate a periodic 2D Tri3 Structure Genome for a circular
+fiber in a square matrix cell. It writes no mesh by default; add `--write-input
+square_pack.json` to save the generated explicit input. It reports apparent
+engineering constants and compares the longitudinal modulus with the Voigt rule
+of mixture.
 
 ## References
 

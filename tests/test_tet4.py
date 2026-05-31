@@ -38,16 +38,17 @@ def cube_tet_mesh() -> SolidMesh:
         ],
         dtype=int,
     )
-    return SolidMesh(nodes=nodes, elements=elements, material_ids=("m",) * 6, element_type="tet4")
+    return SolidMesh(
+        nodes=nodes,
+        elements=[{"type": "tet4", "connectivity": elements, "material": "m"}],
+    )
 
 
 class Tet4Tests(unittest.TestCase):
     def test_single_tet4_assembly_volume_and_d0(self) -> None:
         mesh = SolidMesh(
             nodes=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=float),
-            elements=np.array([[0, 1, 2, 3]], dtype=int),
-            material_ids=("m",),
-            element_type="tet4",
+            elements=[{"type": "tet4", "connectivity": [[0, 1, 2, 3]], "material": "m"}],
         )
         C = isotropic_stiffness(100.0, 0.25)
         system = assemble_msg_system(mesh, {"m": C}, macro_model=macro_model_from_kind("cauchy_3d", mesh=mesh))
@@ -83,15 +84,14 @@ class Tet4Tests(unittest.TestCase):
 
     def test_tet4_config_input(self) -> None:
         config = {
-            "type": "tet4",
             "nodes": [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]],
-            "elements": [{"nodes": [0, 1, 2, 3], "material": "m"}],
+            "elements": [{"type": "tet4", "connectivity": [[0, 1, 2, 3]], "material": "m"}],
         }
 
         mesh = mesh_from_config(config)
 
-        self.assertEqual(mesh.element_type, "tet4")
-        self.assertEqual(mesh.elements.shape, (1, 4))
+        self.assertEqual(mesh.element_types, ("tet4",))
+        self.assertEqual(mesh.element_blocks[0].elements.shape, (1, 4))
 
 
 if __name__ == "__main__":

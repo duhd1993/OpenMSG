@@ -43,7 +43,6 @@ class ConfigTests(unittest.TestCase):
             },
             "materials": {"matrix": {"type": "isotropic", "E": 100.0, "nu": 0.25}},
             "mesh": {
-                "type": "hex8",
                 "nodes": [
                     [0, 0, 0],
                     [1, 0, 0],
@@ -54,7 +53,13 @@ class ConfigTests(unittest.TestCase):
                     [1, 1, 1],
                     [0, 1, 1],
                 ],
-                "elements": [{"nodes": [0, 1, 2, 3, 4, 5, 6, 7], "material": "matrix"}],
+                "elements": [
+                    {
+                        "type": "hex8",
+                        "connectivity": [[0, 1, 2, 3, 4, 5, 6, 7]],
+                        "material": "matrix",
+                    }
+                ],
             },
             "dehomogenization": {"macro_strains": {"unit_z": [0, 0, 0.01, 0, 0, 0]}},
         }
@@ -64,6 +69,8 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(result.local_fields["unit_z"]["strain"].shape, (8, 6))
 
     def test_example_square_pack_script_can_write_explicit_input(self) -> None:
+        if importlib.util.find_spec("gmsh") is None:
+            self.skipTest("gmsh is not installed in this environment")
         root = Path(__file__).resolve().parents[1]
         script = root / "examples" / "square_pack_fiber.py"
         with tempfile.TemporaryDirectory() as tmp:
@@ -74,8 +81,7 @@ class ConfigTests(unittest.TestCase):
             assert spec.loader is not None
             spec.loader.exec_module(module)
             config = module.build_square_pack_config(
-                cells_xy=4,
-                cells_z=1,
+                mesh_size=0.18,
                 fiber_volume_fraction=0.25,
                 matrix_E=3.5,
                 matrix_nu=0.35,
@@ -84,6 +90,8 @@ class ConfigTests(unittest.TestCase):
             )
             output.write_text(__import__("json").dumps(config), encoding="utf-8")
             result = run_config(output)
+            self.assertEqual(result.metadata["element_types"], ["tri3"])
+            self.assertEqual(result.metadata["sg_dimension"], 2)
             self.assertGreater(float(result.Dbar[2, 2]), float(result.Dbar[0, 0]))
 
     def test_analysis_backend_field_is_rejected(self) -> None:
@@ -91,10 +99,9 @@ class ConfigTests(unittest.TestCase):
             "analysis": {"type": "msg_3d_cauchy", "backend": "tensormesh"},
             "materials": {"m": {"type": "isotropic", "E": 100.0, "nu": 0.25}},
             "mesh": {
-                "type": "line2",
                 "active_axes": ["z"],
                 "nodes": [[0.0], [1.0]],
-                "elements": [{"nodes": [0, 1], "material": "m"}],
+                "elements": [{"type": "line2", "connectivity": [[0, 1]], "material": "m"}],
             },
         }
         with self.assertRaisesRegex(ValueError, "analysis.backend has been removed"):
@@ -108,6 +115,19 @@ class ConfigTests(unittest.TestCase):
                     "bounds": [[0, 1], [0, 1], [0, 1]],
                     "cells": [1, 1, 1],
                     "default_material": "m",
+                }
+            )
+
+    def test_top_level_mesh_element_type_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "element types now belong"):
+            mesh_from_config(
+                {
+                    "type": "line2",
+                    "active_axes": ["z"],
+                    "nodes": [[0.0], [1.0]],
+                    "elements": [
+                        {"type": "line2", "connectivity": [[0, 1]], "material": "m"}
+                    ],
                 }
             )
 

@@ -42,7 +42,7 @@ class TensorMeshData:
     """Converted TensorMesh mesh plus material-index metadata."""
 
     mesh: object
-    material_index: tuple[int, ...]
+    material_index_by_cell_type: Mapping[str, tuple[int, ...]]
     material_names: tuple[str, ...]
 
 
@@ -100,7 +100,7 @@ def assemble_msg_system(
     device = sample.device
     dtype = sample.dtype
 
-    C_element = _element_stiffness_stack(
+    C_by_cell_type = _element_stiffness_by_cell_type(
         mesh, material_stiffness, tm_data, torch, dtype=dtype, device=device
     )
 
@@ -125,7 +125,7 @@ def assemble_msg_system(
         B_node = _voigt_b_from_grad3d(block.dN_dx, torch)  # [n_e, n_q, n_basis, 6, 3]
         B = B_node.permute(0, 1, 3, 2, 4).reshape(n_e, n_quad, 6, n_local)  # column = node*3 + comp
 
-        C_e = C_element  # [n_e, 6, 6] (single element type per mesh)
+        C_e = C_by_cell_type[block.cell_type]  # [n_e, 6, 6]
         CB = torch.einsum("eij,eqjk->eqik", C_e, B)  # C @ B
         E_local = torch.einsum("eqmi,eqmj,eq->eij", B, CB, jxw)  # [n_e, n_local, n_local]
 
@@ -150,10 +150,11 @@ def assemble_msg_system(
         torch.cat(vals), torch.cat(rows), torch.cat(cols), (n_dof, n_dof)
     )
 
+    cell_types = tuple(OPENMSG_TO_MESHIO_ELEMENT[name] for name in mesh.element_types)
     metadata = {
         "assembly_kernel": ASSEMBLY_KERNEL,
         "assembly_material_names": list(tm_data.material_names),
-        "assembly_cell_type": OPENMSG_TO_MESHIO_ELEMENT[mesh.element_type],
+        "assembly_cell_types": list(cell_types),
     }
     return MSGSystem(
         E=E_sparse,
@@ -173,17 +174,24 @@ def to_tensormesh_mesh(mesh: SolidMesh) -> TensorMeshData:
 
     material_names = tuple(sorted(set(mesh.material_ids)))
     material_lookup = {name: idx for idx, name in enumerate(material_names)}
-    material_index = tuple(material_lookup[name] for name in mesh.material_ids)
-    material_index_array = np.asarray(material_index, dtype=np.int64)
     points = mesh.nodes if mesh.sg_dimension == 3 else mesh.nodes[:, mesh.active_axes]
+    cells = []
+    material_index_data = []
+    material_index_by_cell_type: dict[str, tuple[int, ...]] = {}
+    for block in mesh.element_blocks:
+        cell_type = OPENMSG_TO_MESHIO_ELEMENT[block.element_type]
+        block_material_index = tuple(material_lookup[name] for name in block.material_ids)
+        cells.append((cell_type, block.elements))
+        material_index_data.append(np.asarray(block_material_index, dtype=np.int64))
+        material_index_by_cell_type[cell_type] = block_material_index
     meshio_mesh = meshio.Mesh(
         points=points,
-        cells=[(OPENMSG_TO_MESHIO_ELEMENT[mesh.element_type], mesh.elements)],
-        cell_data={"material_index": [material_index_array]},
+        cells=cells,
+        cell_data={"material_index": material_index_data},
     )
     return TensorMeshData(
         mesh=tensormesh.Mesh(meshio_mesh, reorder=True),
-        material_index=material_index,
+        material_index_by_cell_type=material_index_by_cell_type,
         material_names=material_names,
     )
 
@@ -217,10 +225,12 @@ def tensormesh_quadrature(
     points = mesh_nodes if mesh.sg_dimension == 3 else mesh_nodes[:, active_axes]
 
     tm_data = to_tensormesh_mesh(mesh)
-    provider = _transformation_provider(tm_data.mesh)
 
     blocks: list[ElementQuadrature] = []
-    for cell_type in provider.element_types:
+    for mesh_block in mesh.element_blocks:
+        cell_type = OPENMSG_TO_MESHIO_ELEMENT[mesh_block.element_type]
+        block_tm_mesh = _to_tensormesh_block_mesh(mesh, mesh_block)
+        provider = _transformation_provider(block_tm_mesh)
         trans = provider.transformation[cell_type]
         trans.update_points(points)
         conn = provider.elements[cell_type].to(device)
@@ -245,12 +255,36 @@ def tensormesh_quadrature(
     return tm_data, blocks
 
 
+def _to_tensormesh_block_mesh(mesh: SolidMesh, block: object) -> object:
+    """Build a one-cell-type TensorMesh mesh for quadrature extraction.
+
+    TensorMesh stores mixed meshes, but its current ElementAssembler projection
+    construction assumes equal element counts while stacking multiple cell
+    types. OpenMSG only needs per-type transformations/connectivity here, so
+    quadrature is extracted one cell type at a time and assembled globally in
+    OpenMSG.
+    """
+
+    import meshio
+    import tensormesh
+
+    points = mesh.nodes if mesh.sg_dimension == 3 else mesh.nodes[:, mesh.active_axes]
+    cell_type = OPENMSG_TO_MESHIO_ELEMENT[block.element_type]
+    meshio_mesh = meshio.Mesh(points=points, cells=[(cell_type, block.elements)])
+    return tensormesh.Mesh(meshio_mesh, reorder=True)
+
+
 def _mesh_node_tensor(mesh, torch, *, dtype, device):
     return torch.as_tensor(mesh.nodes, dtype=dtype, device=device)
 
 
-def _element_stiffness_stack(mesh, material_stiffness, tm_data, torch, *, dtype, device):
-    """Stack per-element 6x6 stiffness, preserving autograd to material tensors."""
+def _element_stiffness_by_cell_type(mesh, material_stiffness, tm_data, torch, *, dtype, device):
+    """Return per-element 6x6 stiffness by TensorMesh cell type.
+
+    The stack is assembled from material tensors once, then indexed separately
+    for each cell block. This keeps mixed meshes on the same autograd path as
+    single-element-type meshes.
+    """
 
     columns = []
     for name in tm_data.material_names:
@@ -264,8 +298,11 @@ def _element_stiffness_stack(mesh, material_stiffness, tm_data, torch, *, dtype,
             raise ValueError(f"material_stiffness[{name!r}] must have shape (6, 6)")
         columns.append(value.to(dtype=dtype, device=device))
     C_stack = torch.stack(columns, dim=0)  # [n_materials, 6, 6]
-    index = torch.as_tensor(tm_data.material_index, dtype=torch.long, device=device)
-    return C_stack[index]  # [n_elements, 6, 6]
+    by_cell_type = {}
+    for cell_type, material_index in tm_data.material_index_by_cell_type.items():
+        index = torch.as_tensor(material_index, dtype=torch.long, device=device)
+        by_cell_type[cell_type] = C_stack[index]  # [n_elements, 6, 6]
+    return by_cell_type
 
 
 def _transformation_provider(tm_mesh):

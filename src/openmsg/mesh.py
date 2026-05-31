@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -35,34 +35,45 @@ OPENMSG_TO_MESHIO_ELEMENT = {value: key for key, value in MESHIO_TO_OPENMSG_ELEM
 
 
 @dataclass(frozen=True)
+class ElementBlock:
+    """Connectivity and materials for one SG element type."""
+
+    element_type: str
+    elements: object
+    material: object
+    material_ids: tuple[str, ...] = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        kind = _normalize_element_type(self.element_type)
+        conn = _normalize_connectivity(self.elements, kind)
+        materials = _normalize_block_material(self.material, n_elements=conn.shape[0])
+        object.__setattr__(self, "element_type", kind)
+        object.__setattr__(self, "elements", conn)
+        object.__setattr__(self, "material_ids", materials)
+
+    @property
+    def n_elements(self) -> int:
+        return int(self.elements.shape[0])
+
+
+@dataclass(frozen=True)
 class SolidMesh:
     """A Structure Genome mesh embedded in 3D coordinate space."""
 
     nodes: np.ndarray
-    elements: np.ndarray
-    material_ids: tuple[str, ...]
-    element_type: str = "hex8"
+    elements: object
     active_axes: tuple[int, ...] | None = None
 
     def __post_init__(self) -> None:
-        nodes = np.asarray(self.nodes, dtype=float)
-        elements = np.asarray(self.elements, dtype=int)
-        element_type = _normalize_element_type(self.element_type)
-        if nodes.ndim != 2 or nodes.shape[1] != 3:
-            raise ValueError("nodes must have shape (n_nodes, 3)")
-        expected_nodes = SUPPORTED_ELEMENT_NODES[element_type]
-        if elements.ndim != 2 or elements.shape[1] != expected_nodes:
-            raise ValueError(f"{element_type} elements must have shape (n_elements, {expected_nodes})")
-        if len(self.material_ids) != len(elements):
-            raise ValueError("material_ids length must match number of elements")
-        if np.min(elements) < 0 or np.max(elements) >= len(nodes):
-            raise ValueError("element connectivity references nodes outside the mesh")
-        active_axes = _normalize_active_axes(self.active_axes, element_type)
+        blocks = _merge_element_blocks(_normalize_element_blocks(self.elements))
+        sg_dimension = _infer_sg_dimension(tuple(block.element_type for block in blocks))
+        active_axes = _normalize_active_axes_by_dimension(self.active_axes, sg_dimension)
+        nodes = _as_3d_points(self.nodes, active_axes=active_axes)
+        _validate_element_blocks(blocks, n_nodes=len(nodes))
         object.__setattr__(self, "nodes", nodes)
-        object.__setattr__(self, "elements", elements)
-        object.__setattr__(self, "material_ids", tuple(str(v) for v in self.material_ids))
-        object.__setattr__(self, "element_type", element_type)
+        object.__setattr__(self, "elements", blocks)
         object.__setattr__(self, "active_axes", active_axes)
+        object.__setattr__(self, "_sg_dimension", sg_dimension)
 
     @property
     def n_nodes(self) -> int:
@@ -70,7 +81,7 @@ class SolidMesh:
 
     @property
     def n_elements(self) -> int:
-        return int(self.elements.shape[0])
+        return sum(block.n_elements for block in self.element_blocks)
 
     @property
     def n_dof(self) -> int:
@@ -78,43 +89,52 @@ class SolidMesh:
 
     @property
     def sg_dimension(self) -> int:
-        return ELEMENT_DIMENSIONS[self.element_type]
+        return int(self._sg_dimension)
+
+    @property
+    def element_types(self) -> tuple[str, ...]:
+        return tuple(block.element_type for block in self.element_blocks)
+
+    @property
+    def element_blocks(self) -> tuple[ElementBlock, ...]:
+        return self.elements
+
+    @property
+    def material_ids(self) -> tuple[str, ...]:
+        return tuple(material for block in self.element_blocks for material in block.material_ids)
 
 
 def mesh_from_config(config: dict[str, object], *, base_dir: str | Path | None = None) -> SolidMesh:
     """Create a mesh from a JSON mesh block."""
 
-    kind = str(config.get("type", "hex8")).lower()
-    if kind in {"hex8", "tet4"}:
-        return _explicit_mesh_from_config(config, kind)
-    if kind in {"quad4", "tri3", "line2"}:
-        return _explicit_mesh_from_config(config, kind)
+    kind = str(config.get("type", "explicit")).lower()
+    if kind in {"explicit", "solid", "sg"}:
+        return _explicit_mesh_from_config(config)
+    if kind in SUPPORTED_ELEMENT_NODES or kind == "mixed":
+        raise ValueError(
+            "mesh element types now belong to each element block; "
+            "omit mesh.type or use mesh.type='explicit'"
+        )
     if kind == "meshio":
         return _meshio_mesh_from_config(config, base_dir=base_dir)
     raise ValueError(f"unsupported mesh type {kind!r}")
 
 
-def _explicit_mesh_from_config(config: dict[str, object], kind: str) -> SolidMesh:
+def _explicit_mesh_from_config(config: dict[str, object]) -> SolidMesh:
     active_axes = _parse_active_axes(config.get("active_axes"))
-    elements_raw = config["elements"]
-    elements: list[list[int]] = []
-    material_ids: list[str] = []
-    for item in elements_raw:  # type: ignore[assignment]
-        if isinstance(item, dict):
-            elements.append([int(v) for v in item["nodes"]])
-            material_ids.append(str(item["material"]))
-        else:
-            raise ValueError(f"explicit {kind} elements must be objects with nodes and material")
+    blocks = _merge_element_blocks(_normalize_element_blocks(config["elements"]))
+    sg_dimension = _infer_sg_dimension(tuple(block.element_type for block in blocks))
+    active_axes = _normalize_active_axes_by_dimension(active_axes, sg_dimension)
     return SolidMesh(
-        nodes=_as_3d_points(config["nodes"], active_axes=_normalize_active_axes(active_axes, kind)),
-        elements=np.asarray(elements),
-        material_ids=material_ids,
-        element_type=kind,
+        nodes=_as_3d_points(config["nodes"], active_axes=active_axes),
+        elements=blocks,
         active_axes=active_axes,
     )
 
 
-def _meshio_mesh_from_config(config: dict[str, object], *, base_dir: str | Path | None = None) -> SolidMesh:
+def _meshio_mesh_from_config(
+    config: dict[str, object], *, base_dir: str | Path | None = None
+) -> SolidMesh:
     try:
         import meshio
     except ImportError as exc:
@@ -124,35 +144,62 @@ def _meshio_mesh_from_config(config: dict[str, object], *, base_dir: str | Path 
     if not path.is_absolute() and base_dir is not None:
         path = Path(base_dir) / path
     meshio_mesh = meshio.read(path)
-    cell_type = str(config.get("cell_type", "hexahedron"))
-    element_type = _normalize_element_type(str(config.get("element_type", MESHIO_TO_OPENMSG_ELEMENT.get(cell_type, cell_type))))
+    cell_types = _meshio_cell_types_from_config(config)
     active_axes = _parse_active_axes(config.get("active_axes"))
-    blocks = [block for block in meshio_mesh.cells if block.type == cell_type]
-    if not blocks:
-        raise ValueError(f"mesh file {path} has no {cell_type!r} cell block")
-    if len(blocks) > 1:
-        elements = np.vstack([block.data for block in blocks])
-    else:
-        elements = np.asarray(blocks[0].data, dtype=int)
-
     material_data = str(config.get("material_data", "material"))
     default_material = str(config.get("default_material", "material"))
-    material_ids = _meshio_material_ids(
-        meshio_mesh=meshio_mesh,
-        cell_type=cell_type,
-        material_data=material_data,
-        default_material=default_material,
-        material_map=config.get("material_map"),
-    )
-    if len(material_ids) != len(elements):
-        raise ValueError(f"meshio material data length does not match selected {cell_type} elements")
+
+    blocks_for_mesh: list[ElementBlock] = []
+    for cell_type in cell_types:
+        element_type = _normalize_element_type(
+            MESHIO_TO_OPENMSG_ELEMENT.get(cell_type, cell_type)
+        )
+        blocks = [block for block in meshio_mesh.cells if block.type == cell_type]
+        if not blocks:
+            raise ValueError(f"mesh file {path} has no {cell_type!r} cell block")
+        elements = (
+            np.vstack([block.data for block in blocks])
+            if len(blocks) > 1
+            else np.asarray(blocks[0].data, dtype=int)
+        )
+        material_ids = _meshio_material_ids(
+            meshio_mesh=meshio_mesh,
+            cell_type=cell_type,
+            material_data=material_data,
+            default_material=default_material,
+            material_map=config.get("material_map"),
+        )
+        if len(material_ids) != len(elements):
+            raise ValueError(
+                f"meshio material data length does not match selected {cell_type} elements"
+            )
+        blocks_for_mesh.append(
+            ElementBlock(
+                element_type=element_type,
+                elements=elements,
+                material=material_ids,
+            )
+        )
+
+    sg_dimension = _infer_sg_dimension(tuple(block.element_type for block in blocks_for_mesh))
+    active_axes = _normalize_active_axes_by_dimension(active_axes, sg_dimension)
     return SolidMesh(
-        nodes=_as_3d_points(meshio_mesh.points, active_axes=_normalize_active_axes(active_axes, element_type)),
-        elements=elements,
-        material_ids=tuple(material_ids),
-        element_type=element_type,
+        nodes=_as_3d_points(meshio_mesh.points, active_axes=active_axes),
+        elements=blocks_for_mesh,
         active_axes=active_axes,
     )
+
+
+def _meshio_cell_types_from_config(config: dict[str, object]) -> tuple[str, ...]:
+    raw = config.get("cell_types", config.get("cell_type", "hexahedron"))
+    if isinstance(raw, str):
+        return (raw,)
+    cell_types = tuple(str(value) for value in raw)  # type: ignore[union-attr]
+    if not cell_types:
+        raise ValueError("meshio input requires at least one cell_type")
+    if len(set(cell_types)) != len(cell_types):
+        raise ValueError("meshio cell_types must be unique")
+    return cell_types
 
 
 def _meshio_material_ids(
@@ -174,7 +221,10 @@ def _meshio_material_ids(
         selected_count = sum(len(block.data) for block in blocks if block.type == cell_type)
         return [default_material] * selected_count
 
-    lookup = {str(key): str(value) for key, value in (material_map or {}).items()}  # type: ignore[union-attr]
+    lookup = {
+        str(key): str(value)
+        for key, value in (material_map or {}).items()  # type: ignore[union-attr]
+    }
     material_ids: list[str] = []
     for value in raw_values:
         key = str(value)
@@ -192,6 +242,104 @@ def _normalize_element_type(element_type: str) -> str:
     return key
 
 
+def _normalize_element_blocks(elements: object) -> tuple[ElementBlock, ...]:
+    if isinstance(elements, ElementBlock):
+        return (elements,)
+    if not isinstance(elements, (list, tuple)):
+        raise ValueError("elements must be a non-empty list of element blocks")
+    if not elements:
+        raise ValueError("elements must contain at least one element block")
+    return tuple(_element_block_from_object(item) for item in elements)
+
+
+def _element_block_from_object(item: object) -> ElementBlock:
+    if isinstance(item, ElementBlock):
+        return item
+    if not isinstance(item, dict):
+        raise ValueError("each element block must be an object")
+    if "type" not in item and "element_type" not in item:
+        raise ValueError("each element block must include an element type")
+    element_type = str(item.get("type", item.get("element_type")))
+    if "connectivity" in item:
+        elements = item["connectivity"]
+    elif "elements" in item:
+        elements = item["elements"]
+    else:
+        raise ValueError("each element block must include connectivity")
+    if "material" in item:
+        material = item["material"]
+    elif "materials" in item:
+        material = item["materials"]
+    else:
+        raise ValueError("each element block must include material or materials")
+    return ElementBlock(element_type=element_type, elements=elements, material=material)
+
+
+def _normalize_connectivity(elements: object, element_type: str) -> np.ndarray:
+    kind = _normalize_element_type(element_type)
+    conn = np.asarray(elements, dtype=int)
+    expected_nodes = SUPPORTED_ELEMENT_NODES[kind]
+    if conn.ndim != 2 or conn.shape[1] != expected_nodes:
+        raise ValueError(f"{kind} elements must have shape (n_elements, {expected_nodes})")
+    if conn.shape[0] == 0:
+        raise ValueError(f"{kind} element block must not be empty")
+    return conn
+
+
+def _normalize_block_material(material: object, *, n_elements: int) -> tuple[str, ...]:
+    if isinstance(material, str):
+        return (material,) * n_elements
+    if np.isscalar(material):
+        return (str(material),) * n_elements
+    materials = tuple(str(value) for value in material)  # type: ignore[arg-type]
+    if len(materials) != n_elements:
+        raise ValueError("block material list length must match number of elements")
+    return materials
+
+
+def _merge_element_blocks(
+    blocks: tuple[ElementBlock, ...] | list[ElementBlock],
+) -> tuple[ElementBlock, ...]:
+    if not blocks:
+        raise ValueError("mesh must contain at least one element block")
+    grouped_elements: dict[str, list[np.ndarray]] = {}
+    grouped_materials: dict[str, list[str]] = {}
+    order: list[str] = []
+    for block in blocks:
+        if block.element_type not in grouped_elements:
+            grouped_elements[block.element_type] = []
+            grouped_materials[block.element_type] = []
+            order.append(block.element_type)
+        grouped_elements[block.element_type].append(block.elements)
+        grouped_materials[block.element_type].extend(block.material_ids)
+    return tuple(
+        ElementBlock(
+            element_type=kind,
+            elements=np.vstack(grouped_elements[kind]),
+            material=tuple(grouped_materials[kind]),
+        )
+        for kind in order
+    )
+
+
+def _validate_element_blocks(blocks: tuple[ElementBlock, ...], *, n_nodes: int) -> None:
+    for block in blocks:
+        if np.min(block.elements) < 0 or np.max(block.elements) >= n_nodes:
+            raise ValueError("element connectivity references nodes outside the mesh")
+
+
+def _infer_sg_dimension(element_types: tuple[str, ...]) -> int:
+    if not element_types:
+        raise ValueError("mesh must contain at least one element type")
+    dimensions = {
+        ELEMENT_DIMENSIONS[_normalize_element_type(element_type)]
+        for element_type in element_types
+    }
+    if len(dimensions) != 1:
+        raise ValueError("mixed meshes may only combine elements with the same SG dimension")
+    return dimensions.pop()
+
+
 def _as_3d_points(value: object, *, active_axes: tuple[int, ...] | None = None) -> np.ndarray:
     points = np.asarray(value, dtype=float)
     if points.ndim != 2 or points.shape[1] not in {1, 2, 3}:
@@ -206,8 +354,7 @@ def _as_3d_points(value: object, *, active_axes: tuple[int, ...] | None = None) 
     return padded
 
 
-def _normalize_active_axes(active_axes: object, element_type: str) -> tuple[int, ...]:
-    sg_dimension = ELEMENT_DIMENSIONS[element_type]
+def _normalize_active_axes_by_dimension(active_axes: object, sg_dimension: int) -> tuple[int, ...]:
     if active_axes is None:
         if sg_dimension == 3:
             return (0, 1, 2)
@@ -215,10 +362,11 @@ def _normalize_active_axes(active_axes: object, element_type: str) -> tuple[int,
             return (1, 2)
         if sg_dimension == 1:
             return (2,)
+        raise ValueError(f"unsupported SG dimension {sg_dimension}")
     axes = _parse_active_axes(active_axes)
     assert axes is not None
     if len(axes) != sg_dimension:
-        raise ValueError(f"{element_type} requires {sg_dimension} active axes")
+        raise ValueError(f"SG dimension {sg_dimension} requires {sg_dimension} active axes")
     if len(set(axes)) != len(axes) or any(axis not in (0, 1, 2) for axis in axes):
         raise ValueError("active_axes must be unique axes chosen from x, y, z")
     return axes

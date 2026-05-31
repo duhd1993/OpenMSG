@@ -15,11 +15,12 @@ from openmsg.materials import (
     stiffness_from_config,
     transversely_isotropic_stiffness,
 )
-from openmsg.mesh import SolidMesh, mesh_from_config
+from openmsg.mesh import ElementBlock, SolidMesh, mesh_from_config
 from openmsg.solver import compute_effective_stiffness, solve_constrained
 
 __all__ = [
     "MacroModel",
+    "ElementBlock",
     "MSGResult",
     "MSGSystem",
     "SolidMesh",

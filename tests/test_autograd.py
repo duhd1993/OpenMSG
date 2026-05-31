@@ -31,9 +31,7 @@ def _hetero_bar():
 def _line2_sg_mesh() -> SolidMesh:
     return SolidMesh(
         nodes=[[0.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
-        elements=[[0, 1]],
-        material_ids=("m",),
-        element_type="line2",
+        elements=[{"type": "line2", "connectivity": [[0, 1]], "material": "m"}],
     )
 
 
@@ -45,9 +43,7 @@ def _quad4_sg_mesh() -> SolidMesh:
             [0.0, 1.0, 1.0],
             [0.0, 0.0, 1.0],
         ],
-        elements=[[0, 1, 2, 3]],
-        material_ids=("m",),
-        element_type="quad4",
+        elements=[{"type": "quad4", "connectivity": [[0, 1, 2, 3]], "material": "m"}],
     )
 
 
@@ -60,9 +56,13 @@ def _line_thickness_mesh() -> SolidMesh:
             [0.0, 0.0, 0.25],
             [0.0, 0.0, 0.5],
         ],
-        elements=[[0, 1], [1, 2], [2, 3], [3, 4]],
-        material_ids=("m",) * 4,
-        element_type="line2",
+        elements=[
+            {
+                "type": "line2",
+                "connectivity": [[0, 1], [1, 2], [2, 3], [3, 4]],
+                "material": "m",
+            }
+        ],
     )
 
 
@@ -74,9 +74,7 @@ def _quad4_cross_section_mesh() -> SolidMesh:
             [0.0, 0.5, 0.5],
             [0.0, -0.5, 0.5],
         ],
-        elements=[[0, 1, 2, 3]],
-        material_ids=("m",),
-        element_type="quad4",
+        elements=[{"type": "quad4", "connectivity": [[0, 1, 2, 3]], "material": "m"}],
     )
 
 

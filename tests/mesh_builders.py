@@ -65,7 +65,11 @@ def structured_hex_mesh(
 
     return SolidMesh(
         nodes=nodes,
-        elements=np.asarray(elements, dtype=int),
-        material_ids=tuple(material_ids),
-        element_type="hex8",
+        elements=[
+            {
+                "type": "hex8",
+                "connectivity": np.asarray(elements, dtype=int),
+                "material": tuple(material_ids),
+            }
+        ],
     )

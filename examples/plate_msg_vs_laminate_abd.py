@@ -131,7 +131,10 @@ def line_thickness_mesh(*, thickness: float = 1.0, n_elements: int = 16) -> Soli
     z = np.linspace(-0.5 * thickness, 0.5 * thickness, n_elements + 1)
     nodes = np.array([[0.0, 0.0, zi] for zi in z], dtype=float)
     elements = np.array([[idx, idx + 1] for idx in range(n_elements)], dtype=int)
-    return SolidMesh(nodes=nodes, elements=elements, material_ids=("m",) * n_elements, element_type="line2")
+    return SolidMesh(
+        nodes=nodes,
+        elements=[{"type": "line2", "connectivity": elements, "material": "m"}],
+    )
 
 
 def run_single_layer_comparison(

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from openmsg.assembly import _element_stiffness_stack, _voigt_b_from_grad3d, tensormesh_quadrature
+from openmsg.assembly import _element_stiffness_by_cell_type, _voigt_b_from_grad3d, tensormesh_quadrature
 from openmsg.macro import MacroModel, macro_model_from_kind
 from openmsg.mesh import SolidMesh
 
@@ -39,7 +39,7 @@ def recover_gauss_fields(
     if tuple(V0_t.shape) != (mesh.n_dof, model.n_macro):
         raise ValueError(f"V0 must have shape (mesh.n_dof, {model.n_macro})")
 
-    C_element = _element_stiffness_stack(
+    C_by_cell_type = _element_stiffness_by_cell_type(
         mesh, material_stiffness, tm_data, torch, dtype=dtype, device=device
     )
     fluctuation = V0_t @ eps_bar_t  # [n_dof]
@@ -63,6 +63,7 @@ def recover_gauss_fields(
         strain = torch.einsum("eqbic,ebc->eqi", B_node, w_elem) + torch.einsum(
             "eqik,k->eqi", B_macro, eps_bar_t
         )  # [n_e, n_q, 6]
+        C_element = C_by_cell_type[block.cell_type]
         stress = torch.einsum("eij,eqj->eqi", C_element, strain)  # [n_e, n_q, 6]
 
         points.append(block.points.reshape(-1, 3).detach().cpu().numpy())

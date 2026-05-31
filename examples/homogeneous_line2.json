@@ -10,11 +10,10 @@
     "matrix": {"type": "isotropic", "E": 100.0, "nu": 0.25}
   },
   "mesh": {
-    "type": "line2",
     "active_axes": ["z"],
     "nodes": [[0.0], [1.0]],
     "elements": [
-      {"nodes": [0, 1], "material": "matrix"}
+      {"type": "line2", "connectivity": [[0, 1]], "material": "matrix"}
     ]
   }
 }

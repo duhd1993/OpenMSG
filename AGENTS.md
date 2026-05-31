@@ -9,7 +9,8 @@ The current implementation scope is intentionally small:
   Kirchhoff-Love plate, and Euler-Bernoulli beam macroscopic models.
 - 1D, 2D, and 3D Structure Genome meshes, where lower-dimensional SGs represent
   translational/symmetry reductions of a 3D continuum problem.
-- Hex8, Tet4, Quad4, Tri3, and Line2 first-order SG finite elements.
+- Hex8, Tet4, Quad4, Tri3, and Line2 first-order SG finite elements, including
+  mixed meshes that combine element types of the same SG dimension.
 - Homogenized stiffness `Dbar`: 6x6 for Cauchy, 6x6 `ABD` for
   Kirchhoff-Love plate, and 4x4 for Euler-Bernoulli beam.
 - Local Gauss-point strain and stress recovery.
@@ -31,6 +32,9 @@ The current implementation scope is intentionally small:
   have been removed.
 - Explicit input meshes are preferred. Mesh generation belongs in examples,
   tests, or external preprocessing scripts, not in the solver core.
+- `SolidMesh` explicit topology is represented as element blocks. Do not add a
+  top-level mesh `element_type`; each block declares its own type, connectivity
+  matrix, and either one material for the block or a per-element material list.
 - Analytical classical laminate ABD helpers are examples/reference code only.
   Do not expose `laminate_abd` as a core API or JSON analysis type; use such
   references only to validate MSG plate outputs.

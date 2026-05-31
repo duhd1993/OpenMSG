@@ -6,10 +6,16 @@
   Euler-Bernoulli beam macroscopic models.
 - Hex8, Tet4, Quad4, Tri3, and Line2 finite element assembly for `E`, `H`, and
   `D0`.
+- Mixed same-dimensional element meshes within one SG mesh, including per-type
+  connectivity, material indexing, TensorMesh quadrature extraction, global DOF
+  scatter, local-field recovery, and material autograd.
 - 1D/2D/3D SG meshes using `active_axes` for reduced-dimensional SG symmetry.
 - Periodic, mean-zero, and average fluctuation-rotation constraints.
 - JSON input format.
 - Explicit solid mesh input as the primary mesh path.
+- Element-block mesh topology: each block carries its element type,
+  connectivity matrix, and block-wide or per-element material assignment; there
+  is no top-level single mesh element type.
 - Torch material definitions for isotropic, cubic, transversely isotropic,
   orthotropic, and full stiffness matrices.
 - TensorMesh-backed assembly for supported 1D/2D/3D SG meshes.
@@ -31,14 +37,15 @@
 - SG-based Kirchhoff-Love plate `ABD` output.
 - SG-based Euler-Bernoulli beam 4x4 stiffness output.
 - Local Gauss-point strain and stress recovery.
-- Square-pack fiber benchmark script with rules-of-mixture comparison.
+- gmsh-based 2D SG square-pack fiber benchmark script with rules-of-mixture
+  comparison.
 - Example-level 1D plate MSG comparison against a classical laminate ABD
   reference.
 - Unit tests for materials, algebra, constraints, assembly, homogeneous recovery,
   TensorMesh assembly validation, dehomogenization, config loading, end-to-end
   material autograd, structural-model material gradients, 1D/2D SG material
-  gradients, dense-vs-sparse material-gradient equivalence, and the square-pack
-  input generator.
+  gradients, dense-vs-sparse material-gradient equivalence, mixed element
+  meshes, and the square-pack input generator.
 
 ## Next Useful Steps
 
@@ -49,6 +56,3 @@
    especially for curvature-dominated plate/beam convergence.
 5. Add optional Reissner-Mindlin plate, Timoshenko beam, and shell
    macroscopic models when requested.
-6. Support multiple element types within a single mesh — per-type connectivity,
-   material indexing, and DOF scatter in `assemble_msg_system` (a single element
-   type per mesh is currently assumed).

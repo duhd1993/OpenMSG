@@ -105,9 +105,13 @@ def _gmsh_square_pack_mesh(
 
     return SolidMesh(
         nodes=nodes,
-        elements=np.asarray(elements, dtype=int),
-        material_ids=tuple(material_ids),
-        element_type="tri3",
+        elements=[
+            {
+                "type": "tri3",
+                "connectivity": np.asarray(elements, dtype=int),
+                "material": tuple(material_ids),
+            }
+        ],
         active_axes=("x", "y"),
     )
 
@@ -130,7 +134,7 @@ def _extrude_tri3_to_tet4(mesh_2d: SolidMesh, lz: float = 1.0) -> SolidMesh:
     requirement.  CW triangles are detected from the signed area and their
     node ordering is flipped before decomposition.
     """
-    assert mesh_2d.element_type == "tri3", "source mesh must be tri3"
+    assert mesh_2d.element_types == ("tri3",), "source mesh must be tri3"
 
     n = mesh_2d.n_nodes
     nodes_top = mesh_2d.nodes.copy()
@@ -139,8 +143,9 @@ def _extrude_tri3_to_tet4(mesh_2d: SolidMesh, lz: float = 1.0) -> SolidMesh:
 
     elements_3d: list[list[int]] = []
     material_ids_3d: list[str] = []
+    tri_block = mesh_2d.element_blocks[0]
 
-    for (b0, b1, b2), mat in zip(mesh_2d.elements, mesh_2d.material_ids):
+    for (b0, b1, b2), mat in zip(tri_block.elements, tri_block.material_ids):
         # Signed area of the bottom triangle in the XY plane
         xy = mesh_2d.nodes[[b0, b1, b2], :2]
         signed_area = 0.5 * (
@@ -160,15 +165,19 @@ def _extrude_tri3_to_tet4(mesh_2d: SolidMesh, lz: float = 1.0) -> SolidMesh:
 
     return SolidMesh(
         nodes=nodes_3d,
-        elements=np.asarray(elements_3d, dtype=int),
-        material_ids=tuple(material_ids_3d),
-        element_type="tet4",
+        elements=[
+            {
+                "type": "tet4",
+                "connectivity": np.asarray(elements_3d, dtype=int),
+                "material": tuple(material_ids_3d),
+            }
+        ],
     )
 
 
 def _triangle_areas(mesh: SolidMesh) -> np.ndarray:
     """Return the signed area of each Tri3 element (always positive for CCW)."""
-    p = mesh.nodes[mesh.elements]           # (n_elem, 3, 3)
+    p = mesh.nodes[mesh.element_blocks[0].elements]  # (n_elem, 3, 3)
     v0 = p[:, 1] - p[:, 0]
     v1 = p[:, 2] - p[:, 0]
     return 0.5 * np.abs(v0[:, 0] * v1[:, 1] - v0[:, 1] * v1[:, 0])

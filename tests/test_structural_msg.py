@@ -17,7 +17,10 @@ def line_thickness_mesh(n_elements: int = 16) -> SolidMesh:
     z = np.linspace(-0.5, 0.5, n_elements + 1)
     nodes = np.array([[0.0, 0.0, zi] for zi in z], dtype=float)
     elements = np.array([[idx, idx + 1] for idx in range(n_elements)], dtype=int)
-    return SolidMesh(nodes=nodes, elements=elements, material_ids=("m",) * n_elements, element_type="line2")
+    return SolidMesh(
+        nodes=nodes,
+        elements=[{"type": "line2", "connectivity": elements, "material": "m"}],
+    )
 
 
 def rectangular_cross_section_mesh(n: int = 4) -> SolidMesh:
@@ -34,9 +37,13 @@ def rectangular_cross_section_mesh(n: int = 4) -> SolidMesh:
             elements.append([node_id(i, j), node_id(i + 1, j), node_id(i + 1, j + 1), node_id(i, j + 1)])
     return SolidMesh(
         nodes=nodes,
-        elements=np.asarray(elements, dtype=int),
-        material_ids=("m",) * len(elements),
-        element_type="quad4",
+        elements=[
+            {
+                "type": "quad4",
+                "connectivity": np.asarray(elements, dtype=int),
+                "material": "m",
+            }
+        ],
     )
 
 
@@ -139,20 +146,26 @@ class StructuralMSGTests(unittest.TestCase):
             "analysis": {"type": "msg_kirchhoff_love_plate"},
             "materials": {"m": C},
             "mesh": {
-                "type": "line2",
                 "active_axes": ["z"],
                 "nodes": [[-0.5], [0.0], [0.5]],
-                "elements": [{"nodes": [0, 1], "material": "m"}, {"nodes": [1, 2], "material": "m"}],
+                "elements": [
+                    {
+                        "type": "line2",
+                        "connectivity": [[0, 1], [1, 2]],
+                        "material": "m",
+                    }
+                ],
             },
         }
         beam_config = {
             "analysis": {"type": "msg_euler_bernoulli_beam"},
             "materials": {"m": C},
             "mesh": {
-                "type": "quad4",
                 "active_axes": ["y", "z"],
                 "nodes": [[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5]],
-                "elements": [{"nodes": [0, 1, 2, 3], "material": "m"}],
+                "elements": [
+                    {"type": "quad4", "connectivity": [[0, 1, 2, 3]], "material": "m"}
+                ],
             },
         }
 

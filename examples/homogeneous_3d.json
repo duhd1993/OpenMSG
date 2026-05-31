@@ -10,7 +10,6 @@
     "matrix": {"type": "isotropic", "E": 100.0, "nu": 0.25}
   },
   "mesh": {
-    "type": "hex8",
     "nodes": [
       [0, 0, 0],
       [1, 0, 0],
@@ -22,7 +21,11 @@
       [0, 1, 1]
     ],
     "elements": [
-      {"nodes": [0, 1, 2, 3, 4, 5, 6, 7], "material": "matrix"}
+      {
+        "type": "hex8",
+        "connectivity": [[0, 1, 2, 3, 4, 5, 6, 7]],
+        "material": "matrix"
+      }
     ]
   }
 }

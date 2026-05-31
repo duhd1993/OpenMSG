@@ -19,10 +19,13 @@ Kirchhoff-Love plate, and Euler-Bernoulli beam macroscopic models.
     "matrix": {"type": "isotropic", "E": 100.0, "nu": 0.25}
   },
   "mesh": {
-    "type": "hex8",
     "nodes": [[0, 0, 0], [1, 0, 0], "..."],
     "elements": [
-      {"nodes": [0, 1, 2, 3, 4, 5, 6, 7], "material": "matrix"}
+      {
+        "type": "hex8",
+        "connectivity": [[0, 1, 2, 3, 4, 5, 6, 7]],
+        "material": "matrix"
+      }
     ]
   }
 }
@@ -189,9 +192,11 @@ All stiffness matrices use Voigt order:
 
 ## Explicit SG Mesh
 
-The production-oriented input path is an explicit mesh with nodes, element
-connectivity, and one material name per element. The supported first-order SG
-element types are:
+The production-oriented input path is an explicit mesh with nodes and element
+blocks. The top-level mesh does not carry an element type. Each block declares
+its element `type`, a 2D `connectivity` matrix, and `material`. `material` may
+be a single material name for the entire block or a list with one name per
+element in that block. The supported first-order SG element types are:
 
 - `hex8`: 8-node trilinear hexahedron.
 - `tet4`: 4-node linear tetrahedron.
@@ -204,9 +209,12 @@ For MSG analyses, all element types use a three-component fluctuation field
 field to vary along selected SG coordinates. The macroscopic output shape is
 chosen by the analysis type, not by the SG dimension.
 
+A single explicit mesh can combine element types of the same SG dimension.
+Valid combinations include `hex8` with `tet4`, or `quad4` with `tri3`; mixing
+1D, 2D, and 3D SG element dimensions in the same mesh is rejected.
+
 ```json
 {
-  "type": "hex8",
   "nodes": [
     [0, 0, 0],
     [1, 0, 0],
@@ -218,10 +226,17 @@ chosen by the analysis type, not by the SG dimension.
     [0, 1, 1]
   ],
   "elements": [
-    {"nodes": [0, 1, 2, 3, 4, 5, 6, 7], "material": "matrix"}
+    {
+      "type": "hex8",
+      "connectivity": [[0, 1, 2, 3, 4, 5, 6, 7]],
+      "material": "matrix"
+    }
   ]
 }
 ```
+
+For heterogeneous blocks, replace the scalar `material` with a list whose
+length equals the number of connectivity rows.
 
 Hex8 node order is:
 
@@ -239,6 +254,30 @@ Tet4 node order follows the standard positively oriented reference tetrahedron:
 Physical elements must have positive Jacobian determinant. If a tetrahedron is
 read with reversed orientation, swap two nodes in that element.
 
+A mixed 2D SG with Quad4 and Tri3 elements:
+
+```json
+{
+  "active_axes": ["y", "z"],
+  "nodes": [
+    [0, 0],
+    [1, 0],
+    [2, 0],
+    [0, 1],
+    [1, 1],
+    [2, 1]
+  ],
+  "elements": [
+    {"type": "quad4", "connectivity": [[0, 1, 4, 3]], "material": "matrix"},
+    {
+      "type": "tri3",
+      "connectivity": [[1, 2, 5], [1, 5, 4]],
+      "material": "matrix"
+    }
+  ]
+}
+```
+
 ## Lower-Dimensional SG Meshes
 
 Use `active_axes` to state which physical axes are represented by the SG
@@ -252,11 +291,10 @@ A 1D homogeneous SG:
 
 ```json
 {
-  "type": "line2",
   "active_axes": ["z"],
   "nodes": [[0], [1]],
   "elements": [
-    {"nodes": [0, 1], "material": "matrix"}
+    {"type": "line2", "connectivity": [[0, 1]], "material": "matrix"}
   ]
 }
 ```
@@ -265,11 +303,10 @@ A 2D SG in the `y-z` plane:
 
 ```json
 {
-  "type": "quad4",
   "active_axes": ["y", "z"],
   "nodes": [[0, 0], [1, 0], [1, 1], [0, 1]],
   "elements": [
-    {"nodes": [0, 1, 2, 3], "material": "matrix"}
+    {"type": "quad4", "connectivity": [[0, 1, 2, 3]], "material": "matrix"}
   ]
 }
 ```
@@ -297,6 +334,22 @@ External mesh files are read through `meshio`:
 
 Use `"cell_type": "tetra"` for Tet4 meshes, `"quad"` or `"triangle"` for 2D SG
 meshes, and `"line"` for 1D SG meshes.
+
+For mixed external meshes, use `cell_types`:
+
+```json
+"mesh": {
+  "type": "meshio",
+  "path": "mixed_2d.vtu",
+  "cell_types": ["quad", "triangle"],
+  "active_axes": ["y", "z"],
+  "default_material": "matrix"
+}
+```
+
+All selected `cell_types` must map to the same SG dimension. If multiple cell
+types are selected, OpenMSG infers `quad4`, `tri3`, `hex8`, `tet4`, or `line2`
+from the meshio cell type names.
 
 Relative paths are resolved relative to the JSON file. If no material data is
 available, `default_material` is used.

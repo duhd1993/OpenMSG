@@ -10,11 +10,10 @@
     "matrix": {"type": "isotropic", "E": 100.0, "nu": 0.25}
   },
   "mesh": {
-    "type": "quad4",
     "active_axes": ["y", "z"],
     "nodes": [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
     "elements": [
-      {"nodes": [0, 1, 2, 3], "material": "matrix"}
+      {"type": "quad4", "connectivity": [[0, 1, 2, 3]], "material": "matrix"}
     ]
   }
 }
