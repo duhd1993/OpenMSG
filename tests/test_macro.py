@@ -5,7 +5,8 @@ import unittest
 import numpy as np
 import torch
 
-from openmsg.macro import MacroModel
+from openmsg.macro import MacroModel, default_constraints_for_macro_model
+from openmsg.mesh import SolidMesh
 
 
 class MacroModelTests(unittest.TestCase):
@@ -62,6 +63,36 @@ class MacroModelTests(unittest.TestCase):
 
         with self.assertRaisesRegex(TypeError, "torch.Tensor"):
             model.strain_modes(np.zeros(3))
+
+    def test_structural_default_constraints_match_msg_theory(self) -> None:
+        plate_model = MacroModel(
+            kind="kirchhoff_love_plate",
+            labels=("e11", "e22", "2e12", "k11", "k22", "2k12"),
+        )
+        plate_mesh = SolidMesh(
+            nodes=[[0.0, 0.0, -0.5], [0.0, 0.0, 0.5]],
+            elements=[{"type": "line2", "connectivity": [[0, 1]], "material": "m"}],
+        )
+
+        beam_model = MacroModel(kind="euler_bernoulli_beam", labels=("e1", "k1", "k2", "k3"))
+        beam_mesh = SolidMesh(
+            nodes=[
+                [0.0, -0.5, -0.5],
+                [0.0, 0.5, -0.5],
+                [0.0, 0.5, 0.5],
+                [0.0, -0.5, 0.5],
+            ],
+            elements=[{"type": "quad4", "connectivity": [[0, 1, 2, 3]], "material": "m"}],
+        )
+
+        self.assertEqual(
+            default_constraints_for_macro_model(plate_model, plate_mesh),
+            [{"type": "mean_zero"}],
+        )
+        self.assertEqual(
+            default_constraints_for_macro_model(beam_model, beam_mesh),
+            [{"type": "mean_zero"}, {"type": "rotation_zero", "pairs": [["y", "z"]]}],
+        )
 
 
 if __name__ == "__main__":

@@ -93,7 +93,7 @@ If `constraints` is omitted, OpenMSG uses model-specific defaults:
 - Cauchy continuum: periodic fluctuation constraints on all axes plus
   mean-zero.
 - Kirchhoff-Love plate: periodic constraints on active in-plane SG axes, plus
-  mean-zero and average fluctuation-rotation removal.
+  mean-zero.
 - Euler-Bernoulli beam: periodic constraints on an active axial SG axis, plus
   mean-zero and average twist removal.
 

@@ -191,7 +191,7 @@ def default_constraints_for_macro_model(model: MacroModel, mesh: SolidMesh | Non
         periodic_axes = _active_axis_names(mesh, model.inplane_axes)
         if periodic_axes:
             constraints.append({"type": "periodic", "axes": periodic_axes})
-        constraints.extend([{"type": "mean_zero"}, {"type": "rotation_zero"}])
+        constraints.append({"type": "mean_zero"})
         return constraints
     if model.kind == "euler_bernoulli_beam":
         constraints = []

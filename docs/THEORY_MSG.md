@@ -193,8 +193,8 @@ This implementation supports:
 - mean-zero fluctuation constraints, equivalent to `<w_i> = 0`;
 - periodic fluctuation constraints, equivalent to matching `w` on opposite SG
   faces;
-- average infinitesimal-rotation constraints, used by default for plate and
-  beam SGs to remove redundant rigid rotation modes of `w`.
+- average twist constraints for beam SGs, equivalent to
+  `<dw2/dy3 - dw3/dy2> = 0` when the beam cross-section axes are `y2,y3`.
 
 The constrained system is:
 
