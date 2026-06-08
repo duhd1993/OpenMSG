@@ -30,6 +30,8 @@
   are treated as fixed mesh geometry, but geometry-derived quadrature data,
   constraints, and normalization factors stay in torch tensors in the core
   solve.
+- Full 3D material orientation transforms at element-block and per-element
+  granularity, including differentiable axis-angle and rotation-matrix inputs.
 - PyTorch-backed `MSGResult` returned directly by `effective_stiffness`; JSON
   conversion happens at `to_dict`/CLI boundaries. The old `homogenize_msg`,
   `MSGTorchResult`, `AssemblyResult`, and NumPy assembly wrappers have been
@@ -49,10 +51,9 @@
 
 ## Next Useful Steps
 
-1. Add full 3D material orientation transforms beyond axis permutations.
-2. Add richer meshio material-region handling and mesh validation diagnostics.
-3. Add reference benchmarks from SwiftComp/VABS/VAPAS/VAMUCH examples.
-4. Add higher-order SG elements where TensorMesh already provides basis support,
+1. Add richer meshio material-region handling and mesh validation diagnostics.
+2. Add reference benchmarks from SwiftComp/VABS/VAPAS/VAMUCH examples.
+3. Add higher-order SG elements where TensorMesh already provides basis support,
    especially for curvature-dominated plate/beam convergence.
-5. Add optional Reissner-Mindlin plate, Timoshenko beam, and shell
+4. Add optional Reissner-Mindlin plate, Timoshenko beam, and shell
    macroscopic models when requested.

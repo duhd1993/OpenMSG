@@ -15,6 +15,7 @@ from typing import Mapping
 import numpy as np
 
 from openmsg.macro import MacroModel
+from openmsg.materials import orientation_matrix_from_spec, rotate_stiffness
 from openmsg.mesh import OPENMSG_TO_MESHIO_ELEMENT, SolidMesh
 
 ASSEMBLY_KERNEL = "tensormesh_autograd"
@@ -155,6 +156,7 @@ def assemble_msg_system(
         "assembly_kernel": ASSEMBLY_KERNEL,
         "assembly_material_names": list(tm_data.material_names),
         "assembly_cell_types": list(cell_types),
+        "has_material_orientation": mesh.has_material_orientation,
     }
     return MSGSystem(
         E=E_sparse,
@@ -282,7 +284,8 @@ def _element_stiffness_by_cell_type(mesh, material_stiffness, tm_data, torch, *,
     """Return per-element 6x6 stiffness by TensorMesh cell type.
 
     The stack is assembled from material tensors once, then indexed separately
-    for each cell block. This keeps mixed meshes on the same autograd path as
+    for each cell block. Element-level orientations are then applied in the same
+    differentiable path. This keeps mixed meshes on the same autograd path as
     single-element-type meshes.
     """
 
@@ -298,10 +301,32 @@ def _element_stiffness_by_cell_type(mesh, material_stiffness, tm_data, torch, *,
             raise ValueError(f"material_stiffness[{name!r}] must have shape (6, 6)")
         columns.append(value.to(dtype=dtype, device=device))
     C_stack = torch.stack(columns, dim=0)  # [n_materials, 6, 6]
+    orientation_by_cell_type = _element_orientation_by_cell_type(
+        mesh, torch, dtype=dtype, device=device
+    )
     by_cell_type = {}
     for cell_type, material_index in tm_data.material_index_by_cell_type.items():
         index = torch.as_tensor(material_index, dtype=torch.long, device=device)
-        by_cell_type[cell_type] = C_stack[index]  # [n_elements, 6, 6]
+        C_local = C_stack[index]  # [n_elements, 6, 6]
+        orientation = orientation_by_cell_type[cell_type]
+        by_cell_type[cell_type] = (
+            C_local if orientation is None else rotate_stiffness(C_local, orientation)
+        )  # [n_elements, 6, 6]
+    return by_cell_type
+
+
+def _element_orientation_by_cell_type(mesh, torch, *, dtype, device):
+    by_cell_type = {}
+    for block in mesh.element_blocks:
+        cell_type = OPENMSG_TO_MESHIO_ELEMENT[block.element_type]
+        if all(spec is None for spec in block.orientation_specs):
+            by_cell_type[cell_type] = None
+            continue
+        matrices = [
+            orientation_matrix_from_spec(spec, dtype=dtype, device=device)
+            for spec in block.orientation_specs
+        ]
+        by_cell_type[cell_type] = torch.stack(matrices, dim=0)
     return by_cell_type
 
 

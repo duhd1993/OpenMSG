@@ -8,7 +8,12 @@ import importlib.util
 import numpy as np
 
 from openmsg.config import run_config
-from openmsg.materials import isotropic_stiffness
+from openmsg.materials import (
+    isotropic_stiffness,
+    orthotropic_stiffness,
+    rotate_stiffness,
+    rotation_matrix_from_axis_angle,
+)
 from openmsg.mesh import mesh_from_config
 
 
@@ -67,6 +72,70 @@ class ConfigTests(unittest.TestCase):
         result = run_config(config)
         self.assertIn("unit_z", result.local_fields)
         self.assertEqual(result.local_fields["unit_z"]["strain"].shape, (8, 6))
+
+    def test_config_accepts_block_material_orientation(self) -> None:
+        config = {
+            "analysis": {
+                "type": "msg_3d_cauchy",
+                "constraints": ["periodic", "mean_zero"],
+            },
+            "materials": {
+                "fiber": {
+                    "type": "orthotropic",
+                    "E1": 70.0,
+                    "E2": 12.0,
+                    "E3": 8.0,
+                    "nu12": 0.24,
+                    "nu13": 0.20,
+                    "nu23": 0.18,
+                    "G12": 5.0,
+                    "G13": 4.0,
+                    "G23": 3.0,
+                }
+            },
+            "mesh": {
+                "nodes": [
+                    [0, 0, 0],
+                    [1, 0, 0],
+                    [1, 1, 0],
+                    [0, 1, 0],
+                    [0, 0, 1],
+                    [1, 0, 1],
+                    [1, 1, 1],
+                    [0, 1, 1],
+                ],
+                "elements": [
+                    {
+                        "type": "hex8",
+                        "connectivity": [[0, 1, 2, 3, 4, 5, 6, 7]],
+                        "material": "fiber",
+                        "orientation": {
+                            "type": "axis_angle",
+                            "axis": [0.0, 0.0, 1.0],
+                            "angle_degrees": 30.0,
+                        },
+                    }
+                ],
+            },
+        }
+        C = orthotropic_stiffness(
+            E1=70.0,
+            E2=12.0,
+            E3=8.0,
+            nu12=0.24,
+            nu13=0.20,
+            nu23=0.18,
+            G12=5.0,
+            G13=4.0,
+            G23=3.0,
+        )
+        R = rotation_matrix_from_axis_angle(axis=[0.0, 0.0, 1.0], angle_degrees=30.0)
+        expected = rotate_stiffness(C, R)
+
+        result = run_config(config)
+
+        self.assertTrue(result.metadata["has_material_orientation"])
+        np.testing.assert_allclose(result.Dbar, expected, rtol=1e-10, atol=1e-10)
 
     def test_example_square_pack_script_can_write_explicit_input(self) -> None:
         if importlib.util.find_spec("gmsh") is None:

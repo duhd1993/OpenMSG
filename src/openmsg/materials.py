@@ -181,6 +181,115 @@ def as_stiffness_matrix(
     return C
 
 
+def rotation_matrix_from_axis_angle(
+    *,
+    axis: object,
+    angle_radians: object | None = None,
+    angle_degrees: object | None = None,
+    dtype: object | None = None,
+    device: object | None = None,
+) -> torch.Tensor:
+    """Return a differentiable local-to-global rotation matrix.
+
+    Exactly one of ``angle_radians`` or ``angle_degrees`` must be provided.
+    ``axis`` is normalized internally and may be any 3-vector accepted by
+    ``torch.as_tensor``.
+    """
+
+    if (angle_radians is None) == (angle_degrees is None):
+        raise ValueError("provide exactly one of angle_radians or angle_degrees")
+    angle = angle_radians if angle_radians is not None else angle_degrees
+    dtype, device = _dtype_device((axis, angle), dtype=dtype, device=device)
+    axis_t = torch.as_tensor(axis, dtype=dtype, device=device)
+    if tuple(axis_t.shape) != (3,):
+        raise ValueError("axis-angle orientation requires axis with shape (3,)")
+    norm = torch.linalg.norm(axis_t)
+    if float(norm.detach().cpu()) <= 0.0:
+        raise ValueError("axis-angle orientation axis must be nonzero")
+    unit = axis_t / norm
+    angle_t = _scalar_tensor(angle, dtype=dtype, device=device)
+    if angle_degrees is not None:
+        angle_t = angle_t * (torch.pi / 180.0)
+
+    kx, ky, kz = unit.unbind()
+    zero = torch.zeros((), dtype=dtype, device=device)
+    K = torch.stack(
+        [
+            torch.stack([zero, -kz, ky]),
+            torch.stack([kz, zero, -kx]),
+            torch.stack([-ky, kx, zero]),
+        ]
+    )
+    I = torch.eye(3, dtype=dtype, device=device)
+    return I + torch.sin(angle_t) * K + (1.0 - torch.cos(angle_t)) * (K @ K)
+
+
+def orientation_matrix_from_spec(
+    spec: object,
+    *,
+    dtype: object | None = None,
+    device: object | None = None,
+) -> torch.Tensor:
+    """Build a local-to-global rotation matrix from an orientation spec."""
+
+    if spec is None:
+        return torch.eye(3, dtype=dtype or torch.float64, device=device)
+    if isinstance(spec, dict):
+        kind = str(spec.get("type", "matrix" if "local_to_global" in spec else "axis_angle")).lower()
+        if kind in {"matrix", "rotation_matrix", "local_to_global"}:
+            if "local_to_global" not in spec:
+                raise ValueError("matrix orientation requires local_to_global")
+            return _as_rotation_matrix(spec["local_to_global"], dtype=dtype, device=device)
+        if kind in {"axis_angle", "axis-angle"}:
+            has_rad = "angle_radians" in spec
+            has_deg = "angle_degrees" in spec
+            if has_rad == has_deg:
+                raise ValueError("axis_angle orientation requires exactly one angle_radians or angle_degrees")
+            return rotation_matrix_from_axis_angle(
+                axis=spec["axis"],
+                angle_radians=spec.get("angle_radians"),
+                angle_degrees=spec.get("angle_degrees"),
+                dtype=dtype,
+                device=device,
+            )
+        raise ValueError(f"unsupported orientation type {kind!r}")
+    return _as_rotation_matrix(spec, dtype=dtype, device=device)
+
+
+def rotate_stiffness(C: object, local_to_global: object) -> torch.Tensor:
+    """Rotate stiffness from material-local axes to global SG axes.
+
+    ``C`` may have shape ``(6, 6)`` or ``(n, 6, 6)``. ``local_to_global`` may
+    have shape ``(3, 3)`` or ``(n, 3, 3)``. The rotation matrix columns are the
+    local material basis vectors expressed in global coordinates.
+    """
+
+    dtype, device = _dtype_device((C, local_to_global), dtype=None, device=None)
+    C_t = _as_stiffness_stack(C, dtype=dtype, device=device)
+    R_t = _as_rotation_matrix(local_to_global, dtype=dtype, device=device)
+    c_single = C_t.ndim == 2
+    r_single = R_t.ndim == 2
+    if c_single:
+        C_t = C_t.unsqueeze(0)
+    if r_single:
+        R_t = R_t.unsqueeze(0)
+
+    n_c = C_t.shape[0]
+    n_r = R_t.shape[0]
+    if n_c != n_r:
+        if n_c == 1:
+            C_t = C_t.expand(n_r, -1, -1)
+        elif n_r == 1:
+            R_t = R_t.expand(n_c, -1, -1)
+        else:
+            raise ValueError("batched stiffness and orientation counts must match")
+
+    T_e = _strain_transform(R_t)
+    T_s = _stress_transform(R_t)
+    rotated = torch.einsum("nij,njk,nkl->nil", T_s, C_t, T_e)
+    return rotated[0] if c_single and r_single else rotated
+
+
 def stiffness_from_config(config: dict[str, object]) -> torch.Tensor:
     """Build a material stiffness tensor from a JSON material block."""
 
@@ -235,11 +344,13 @@ def assert_positive_definite(C: object, *, name: str = "C") -> None:
 def rotate_stiffness_by_axis_permutation(C: object, local_to_global: tuple[int, int, int]) -> torch.Tensor:
     """Rotate a stiffness tensor by a pure axis permutation."""
 
-    matrix = as_stiffness_matrix(C)
     if sorted(local_to_global) != [0, 1, 2]:
         raise ValueError("local_to_global must be a permutation of (0, 1, 2)")
-    P = _voigt_permutation(local_to_global, dtype=matrix.dtype, device=matrix.device)
-    return as_stiffness_matrix(P.transpose(0, 1) @ matrix @ P)
+    matrix = as_stiffness_matrix(C)
+    R = torch.zeros((3, 3), dtype=matrix.dtype, device=matrix.device)
+    for local_axis, global_axis in enumerate(local_to_global):
+        R[global_axis, local_axis] = 1.0
+    return rotate_stiffness(matrix, R)
 
 
 def engineering_constants_from_stiffness(C: object) -> dict[str, float]:
@@ -310,6 +421,127 @@ def _longitudinal_axis_permutation(axis: str) -> tuple[int, int, int]:
     if key == "z":
         return (2, 0, 1)
     raise ValueError("axis must be one of 'x', 'y', or 'z'")
+
+
+def _as_stiffness_stack(
+    value: object,
+    *,
+    dtype: object,
+    device: object | None,
+) -> torch.Tensor:
+    if isinstance(value, torch.Tensor):
+        C = value.to(dtype=dtype, device=device)
+    else:
+        C = torch.as_tensor(value, dtype=dtype, device=device)
+    if C.shape == (6, 6):
+        pass
+    elif C.ndim == 3 and tuple(C.shape[-2:]) == (6, 6):
+        pass
+    else:
+        raise ValueError(f"stiffness must have shape (6, 6) or (n, 6, 6), got {tuple(C.shape)}")
+    return C
+
+
+def _as_rotation_matrix(
+    value: object,
+    *,
+    dtype: object | None,
+    device: object | None,
+) -> torch.Tensor:
+    if isinstance(value, torch.Tensor):
+        R = value.to(dtype=dtype or value.dtype, device=device or value.device)
+    else:
+        R = torch.as_tensor(value, dtype=dtype or torch.float64, device=device)
+    if R.shape == (3, 3):
+        check = R.unsqueeze(0)
+    elif R.ndim == 3 and tuple(R.shape[-2:]) == (3, 3):
+        check = R
+    else:
+        raise ValueError(f"orientation matrix must have shape (3, 3) or (n, 3, 3), got {tuple(R.shape)}")
+    eye = torch.eye(3, dtype=R.dtype, device=R.device).expand(check.shape[0], -1, -1)
+    if not torch.allclose(
+        torch.matmul(check.transpose(-1, -2), check).detach(),
+        eye.detach(),
+        rtol=1e-8,
+        atol=1e-8,
+    ):
+        raise ValueError("orientation matrix must be orthonormal")
+    det = torch.linalg.det(check)
+    if bool((det.detach().cpu() <= 0.0).any()):
+        raise ValueError("orientation matrix must have positive determinant")
+    return R
+
+
+def _strain_transform(local_to_global: torch.Tensor) -> torch.Tensor:
+    basis = torch.eye(6, dtype=local_to_global.dtype, device=local_to_global.device)
+    eps_global = _strain_tensors_from_engineering_voigt(basis)
+    eps_local = torch.einsum("ngp,bgh,nhq->nbpq", local_to_global, eps_global, local_to_global)
+    return _engineering_voigt_from_strain_tensors(eps_local).permute(0, 2, 1)
+
+
+def _stress_transform(local_to_global: torch.Tensor) -> torch.Tensor:
+    basis = torch.eye(6, dtype=local_to_global.dtype, device=local_to_global.device)
+    stress_local = _stress_tensors_from_voigt(basis)
+    stress_global = torch.einsum(
+        "ngp,bpq,nhq->nbgh", local_to_global, stress_local, local_to_global
+    )
+    return _stress_voigt_from_tensors(stress_global).permute(0, 2, 1)
+
+
+def _strain_tensors_from_engineering_voigt(voigt: torch.Tensor) -> torch.Tensor:
+    tensors = torch.zeros((*voigt.shape[:-1], 3, 3), dtype=voigt.dtype, device=voigt.device)
+    tensors[..., 0, 0] = voigt[..., 0]
+    tensors[..., 1, 1] = voigt[..., 1]
+    tensors[..., 2, 2] = voigt[..., 2]
+    tensors[..., 1, 2] = 0.5 * voigt[..., 3]
+    tensors[..., 2, 1] = 0.5 * voigt[..., 3]
+    tensors[..., 0, 2] = 0.5 * voigt[..., 4]
+    tensors[..., 2, 0] = 0.5 * voigt[..., 4]
+    tensors[..., 0, 1] = 0.5 * voigt[..., 5]
+    tensors[..., 1, 0] = 0.5 * voigt[..., 5]
+    return tensors
+
+
+def _stress_tensors_from_voigt(voigt: torch.Tensor) -> torch.Tensor:
+    tensors = torch.zeros((*voigt.shape[:-1], 3, 3), dtype=voigt.dtype, device=voigt.device)
+    tensors[..., 0, 0] = voigt[..., 0]
+    tensors[..., 1, 1] = voigt[..., 1]
+    tensors[..., 2, 2] = voigt[..., 2]
+    tensors[..., 1, 2] = voigt[..., 3]
+    tensors[..., 2, 1] = voigt[..., 3]
+    tensors[..., 0, 2] = voigt[..., 4]
+    tensors[..., 2, 0] = voigt[..., 4]
+    tensors[..., 0, 1] = voigt[..., 5]
+    tensors[..., 1, 0] = voigt[..., 5]
+    return tensors
+
+
+def _engineering_voigt_from_strain_tensors(tensors: torch.Tensor) -> torch.Tensor:
+    return torch.stack(
+        [
+            tensors[..., 0, 0],
+            tensors[..., 1, 1],
+            tensors[..., 2, 2],
+            2.0 * tensors[..., 1, 2],
+            2.0 * tensors[..., 0, 2],
+            2.0 * tensors[..., 0, 1],
+        ],
+        dim=-1,
+    )
+
+
+def _stress_voigt_from_tensors(tensors: torch.Tensor) -> torch.Tensor:
+    return torch.stack(
+        [
+            tensors[..., 0, 0],
+            tensors[..., 1, 1],
+            tensors[..., 2, 2],
+            tensors[..., 1, 2],
+            tensors[..., 0, 2],
+            tensors[..., 0, 1],
+        ],
+        dim=-1,
+    )
 
 
 def _voigt_permutation(

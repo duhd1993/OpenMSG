@@ -41,15 +41,19 @@ class ElementBlock:
     element_type: str
     elements: object
     material: object
+    orientation: object | None = None
     material_ids: tuple[str, ...] = field(init=False, repr=False)
+    orientation_specs: tuple[object | None, ...] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         kind = _normalize_element_type(self.element_type)
         conn = _normalize_connectivity(self.elements, kind)
         materials = _normalize_block_material(self.material, n_elements=conn.shape[0])
+        orientations = _normalize_block_orientation(self.orientation, n_elements=conn.shape[0])
         object.__setattr__(self, "element_type", kind)
         object.__setattr__(self, "elements", conn)
         object.__setattr__(self, "material_ids", materials)
+        object.__setattr__(self, "orientation_specs", orientations)
 
     @property
     def n_elements(self) -> int:
@@ -102,6 +106,14 @@ class SolidMesh:
     @property
     def material_ids(self) -> tuple[str, ...]:
         return tuple(material for block in self.element_blocks for material in block.material_ids)
+
+    @property
+    def has_material_orientation(self) -> bool:
+        return any(
+            spec is not None
+            for block in self.element_blocks
+            for spec in block.orientation_specs
+        )
 
 
 def mesh_from_config(config: dict[str, object], *, base_dir: str | Path | None = None) -> SolidMesh:
@@ -272,7 +284,12 @@ def _element_block_from_object(item: object) -> ElementBlock:
         material = item["materials"]
     else:
         raise ValueError("each element block must include material or materials")
-    return ElementBlock(element_type=element_type, elements=elements, material=material)
+    return ElementBlock(
+        element_type=element_type,
+        elements=elements,
+        material=material,
+        orientation=item.get("orientation"),
+    )
 
 
 def _normalize_connectivity(elements: object, element_type: str) -> np.ndarray:
@@ -297,6 +314,33 @@ def _normalize_block_material(material: object, *, n_elements: int) -> tuple[str
     return materials
 
 
+def _normalize_block_orientation(
+    orientation: object | None,
+    *,
+    n_elements: int,
+) -> tuple[object | None, ...]:
+    if orientation is None:
+        return (None,) * n_elements
+    if _is_single_orientation_spec(orientation):
+        return (orientation,) * n_elements
+    if not isinstance(orientation, (list, tuple)):
+        raise ValueError("orientation must be a single spec or a list of per-element specs")
+    specs = tuple(orientation)
+    if len(specs) != n_elements:
+        raise ValueError("block orientation list length must match number of elements")
+    for spec in specs:
+        if not _is_single_orientation_spec(spec):
+            raise ValueError("each per-element orientation must be an orientation spec")
+    return specs
+
+
+def _is_single_orientation_spec(value: object) -> bool:
+    if value is None or isinstance(value, dict):
+        return True
+    shape = getattr(value, "shape", None)
+    return shape is not None and tuple(shape) == (3, 3)
+
+
 def _merge_element_blocks(
     blocks: tuple[ElementBlock, ...] | list[ElementBlock],
 ) -> tuple[ElementBlock, ...]:
@@ -304,19 +348,23 @@ def _merge_element_blocks(
         raise ValueError("mesh must contain at least one element block")
     grouped_elements: dict[str, list[np.ndarray]] = {}
     grouped_materials: dict[str, list[str]] = {}
+    grouped_orientations: dict[str, list[object | None]] = {}
     order: list[str] = []
     for block in blocks:
         if block.element_type not in grouped_elements:
             grouped_elements[block.element_type] = []
             grouped_materials[block.element_type] = []
+            grouped_orientations[block.element_type] = []
             order.append(block.element_type)
         grouped_elements[block.element_type].append(block.elements)
         grouped_materials[block.element_type].extend(block.material_ids)
+        grouped_orientations[block.element_type].extend(block.orientation_specs)
     return tuple(
         ElementBlock(
             element_type=kind,
             elements=np.vstack(grouped_elements[kind]),
             material=tuple(grouped_materials[kind]),
+            orientation=tuple(grouped_orientations[kind]),
         )
         for kind in order
     )

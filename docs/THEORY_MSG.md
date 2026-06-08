@@ -148,7 +148,9 @@ B_macro_beam(y2,y3) =
 The SG strain energy is:
 
 ```text
-U = 1/2 ∫ (B_w V + eps_bar)^T C(y) (B_w V + eps_bar) dOmega
+U = 1/2 ∫ (B_w V + B_macro(y) eps_bar)^T
+          C(y)
+          (B_w V + B_macro(y) eps_bar) dOmega
 ```
 
 Define:

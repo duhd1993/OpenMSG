@@ -12,7 +12,7 @@ import unittest
 import torch
 
 from openmsg.homogenize import effective_stiffness
-from openmsg.materials import isotropic_stiffness
+from openmsg.materials import isotropic_stiffness, orthotropic_stiffness
 from openmsg.mesh import SolidMesh
 from tests.mesh_builders import structured_hex_mesh
 
@@ -152,6 +152,47 @@ class AutogradTests(unittest.TestCase):
 
         self.assertIsNotNone(young.grad)
         self.assertGreater(float(young.grad.abs()), 0.0)
+
+    def test_orientation_angle_gradient_flows_through_dbar(self) -> None:
+        base = structured_hex_mesh(
+            bounds=((0, 1), (0, 1), (0, 1)),
+            cells=(1, 1, 1),
+            default_material="m",
+        )
+        angle = torch.tensor(0.2, dtype=torch.float64, requires_grad=True)
+        mesh = SolidMesh(
+            nodes=base.nodes,
+            elements=[
+                {
+                    "type": "hex8",
+                    "connectivity": base.element_blocks[0].elements,
+                    "material": "m",
+                    "orientation": {
+                        "type": "axis_angle",
+                        "axis": [0.0, 0.0, 1.0],
+                        "angle_radians": angle,
+                    },
+                }
+            ],
+        )
+        C = orthotropic_stiffness(
+            E1=70.0,
+            E2=12.0,
+            E3=8.0,
+            nu12=0.24,
+            nu13=0.20,
+            nu23=0.18,
+            G12=5.0,
+            G13=4.0,
+            G23=3.0,
+        )
+
+        result = effective_stiffness(mesh=mesh, material_stiffness={"m": C})
+        result.Dbar[0, 0].backward()
+
+        self.assertIsNotNone(angle.grad)
+        self.assertTrue(torch.isfinite(angle.grad))
+        self.assertGreater(float(angle.grad.abs()), 0.0)
 
     def test_reduced_sg_material_gradient_scale_is_analytic(self) -> None:
         C0 = isotropic_stiffness(100.0, 0.25)

@@ -190,6 +190,10 @@ All stiffness matrices use Voigt order:
 [e11, e22, e33, 2e23, 2e13, 2e12]
 ```
 
+Material stiffnesses are interpreted in their local material axes. Use element
+block `orientation` to rotate a local material stiffness into the global SG
+coordinate system.
+
 ## Explicit SG Mesh
 
 The production-oriented input path is an explicit mesh with nodes and element
@@ -237,6 +241,47 @@ Valid combinations include `hex8` with `tet4`, or `quad4` with `tri3`; mixing
 
 For heterogeneous blocks, replace the scalar `material` with a list whose
 length equals the number of connectivity rows.
+
+## Material Orientation
+
+An element block may include `orientation`. If omitted, the identity orientation
+is used. Orientation matrices follow the `local_to_global` convention: the
+columns of the 3x3 matrix are the local material basis vectors expressed in
+global SG coordinates.
+
+Block-wide axis-angle orientation:
+
+```json
+{
+  "type": "hex8",
+  "connectivity": [[0, 1, 2, 3, 4, 5, 6, 7]],
+  "material": "fiber",
+  "orientation": {
+    "type": "axis_angle",
+    "axis": [0, 0, 1],
+    "angle_degrees": 30.0
+  }
+}
+```
+
+Use exactly one of `angle_degrees` or `angle_radians`. A 3x3 matrix orientation
+is also accepted:
+
+```json
+"orientation": {
+  "type": "matrix",
+  "local_to_global": [
+    [1, 0, 0],
+    [0, 1, 0],
+    [0, 0, 1]
+  ]
+}
+```
+
+For per-element orientations, replace the single `orientation` object with a
+list whose length equals the number of connectivity rows. The Python API also
+accepts torch tensors inside orientation specs; gradients of `Dbar` can flow
+back to axis-angle values or rotation matrices when they require gradients.
 
 Hex8 node order is:
 

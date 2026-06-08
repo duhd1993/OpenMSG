@@ -11,6 +11,8 @@ current version implements a testable core:
   output stiffness shape;
 - mean-zero and periodic fluctuation constraints;
 - TensorMesh assembly for supported 1D/2D/3D SG meshes;
+- block-level and per-element material orientation with differentiable 3D
+  stiffness rotation;
 - Gauss-point local strain/stress recovery.
 
 The implementation follows the sign and shape conventions in
@@ -127,11 +129,12 @@ See `docs/INPUT_FORMAT.md` and `examples/`.
 
 The main input path is an explicit SG mesh with nodes and element blocks. Each
 block declares its element type, a connectivity matrix, and either one material
-name for the whole block or a per-element material list. A single explicit mesh
-may mix same-dimensional element types, for example Quad4 with Tri3 or Hex8
-with Tet4. Mesh generation is intentionally outside the solver core; example
-scripts may generate JSON inputs for testing. Reduced 1D/2D SG meshes use
-`active_axes` to state which physical axes remain nonuniform.
+name for the whole block or a per-element material list. Blocks may also define
+a block-wide or per-element material orientation. A single explicit mesh may
+mix same-dimensional element types, for example Quad4 with Tri3 or Hex8 with
+Tet4. Mesh generation is intentionally outside the solver core; example scripts
+may generate JSON inputs for testing. Reduced 1D/2D SG meshes use `active_axes`
+to state which physical axes remain nonuniform.
 
 Set `analysis.type` to choose the macroscopic model:
 
